@@ -194,14 +194,70 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    frames[0].save(
-        args.output,
-        save_all=True,
-        append_images=frames[1:],
-        duration=max(1, 1000 // args.fps),
-        loop=0,
-        optimize=True,
-    )
+    if args.output.suffix.lower() == ".mp4":
+        saved = False
+        try:
+            import imageio
+
+            writer = imageio.get_writer(str(args.output), fps=args.fps)
+            for frame in frames:
+                writer.append_data(np.asarray(frame))
+            writer.close()
+            saved = True
+        except ImportError:
+            pass
+
+        if not saved:
+            import shutil
+            import subprocess
+
+            if shutil.which("ffmpeg"):
+                proc = subprocess.Popen(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-f",
+                        "rawvideo",
+                        "-vcodec",
+                        "rawvideo",
+                        "-s",
+                        f"{screen_width}x{screen_height}",
+                        "-pix_fmt",
+                        "rgb24",
+                        "-r",
+                        str(args.fps),
+                        "-i",
+                        "-",
+                        "-c:v",
+                        "libx264",
+                        "-pix_fmt",
+                        "yuv420p",
+                        str(args.output),
+                    ],
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                for frame in frames:
+                    proc.stdin.write(frame.tobytes())  # type: ignore[union-attr]
+                proc.stdin.close()  # type: ignore[union-attr]
+                proc.wait()
+                saved = True
+
+        if not saved:
+            raise SystemExit(
+                "Exporting to .mp4 requires 'imageio' (pip install imageio imageio-ffmpeg) "
+                "or system 'ffmpeg'. Alternatively, export to .gif."
+            )
+    else:
+        frames[0].save(
+            args.output,
+            save_all=True,
+            append_images=frames[1:],
+            duration=max(1, 1000 // args.fps),
+            loop=0,
+            optimize=True,
+        )
     size = args.output.stat().st_size
     print(
         f"  {summary['deliveries']} deliveries over {summary['decisions']} decisions, "
