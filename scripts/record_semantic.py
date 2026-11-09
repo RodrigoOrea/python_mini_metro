@@ -32,6 +32,8 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../src")
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
+from collections import Counter  # noqa: E402
+
 import pygame  # noqa: E402
 from PIL import Image  # noqa: E402
 from search_policy import (  # noqa: E402
@@ -50,6 +52,140 @@ from save_game import serialize_game  # noqa: E402
 
 PLAYERS = ("heuristic", "rorea", "search", "model")
 
+SHAPE_LABELS = {
+    "RECT": "Square / Cuadrado",
+    "CIRCLE": "Circle / Círculo",
+    "TRIANGLE": "Triangle / Triángulo",
+    "CROSS": "Cross / Cruz",
+    "DIAMOND": "Diamond / Rombo",
+    "PENTAGON": "Pentagon / Pentágono",
+    "STAR": "Star / Estrella",
+}
+
+
+def _overbooking_details(mediator) -> dict | None:
+    """Identify the station that triggered game over or has the highest wait pressure."""
+    if not mediator.stations:
+        return None
+
+    candidates = []
+    max_wait_ms = getattr(mediator, "passenger_max_wait_time_ms", 40_000)
+    for station in mediator.stations:
+        overdue = [p for p in station.passengers if p.wait_ms >= max_wait_ms]
+        station_max_wait = max((p.wait_ms for p in station.passengers), default=0)
+        candidates.append(
+            (station, len(overdue), station_max_wait, len(station.passengers))
+        )
+
+    candidates.sort(key=lambda c: (c[1], c[2], c[3]), reverse=True)
+    if not candidates or candidates[0][3] == 0:
+        return None
+
+    station, overdue_count, max_wait, total_passengers = candidates[0]
+    shape_name = getattr(station.shape.type, "name", str(station.shape.type))
+    shape_label = SHAPE_LABELS.get(shape_name, shape_name)
+
+    counts: Counter[str] = Counter()
+    for p in station.passengers:
+        p_name = getattr(
+            p.destination_shape.type, "name", str(p.destination_shape.type)
+        )
+        counts[SHAPE_LABELS.get(p_name, p_name)] += 1
+
+    lines = []
+    for idx, path in enumerate(mediator.paths):
+        if station in path.stations:
+            lines.append(f"Line {idx}")
+
+    return {
+        "station": station,
+        "shape": shape_label,
+        "position": (int(station.position.left), int(station.position.top)),
+        "total_passengers": total_passengers,
+        "overdue_count": overdue_count,
+        "max_wait_s": max_wait / 1000.0,
+        "limit_s": max_wait_ms / 1000.0,
+        "breakdown": dict(counts),
+        "lines": lines if lines else ["None (Unserved)"],
+    }
+
+
+def _annotate_final_frame(
+    surface: pygame.Surface, mediator, details: dict | None
+) -> Image.Image:
+    """Render the game over state annotated with the overcrowded station details."""
+    surface.fill((255, 255, 255))
+    mediator.render(surface)
+    if details is None:
+        raw = pygame.image.tobytes(surface, "RGB")
+        return Image.frombytes("RGB", surface.get_size(), raw)
+
+    pos = details["position"]
+    # Reticle and rings around the overcrowded station
+    pygame.draw.circle(surface, (230, 35, 35), pos, radius=50, width=5)
+    pygame.draw.circle(surface, (255, 95, 95), pos, radius=62, width=2)
+    pygame.draw.line(
+        surface, (230, 35, 35), (pos[0] - 75, pos[1]), (pos[0] - 55, pos[1]), width=3
+    )
+    pygame.draw.line(
+        surface, (230, 35, 35), (pos[0] + 55, pos[1]), (pos[0] + 75, pos[1]), width=3
+    )
+    pygame.draw.line(
+        surface, (230, 35, 35), (pos[0], pos[1] - 75), (pos[0], pos[1] - 55), width=3
+    )
+    pygame.draw.line(
+        surface, (230, 35, 35), (pos[0], pos[1] + 55), (pos[0], pos[1] + 75), width=3
+    )
+
+    # Info card at bottom
+    sw, sh = surface.get_size()
+    card_w = min(1200, sw - 80)
+    card_h = 220
+    card_x = (sw - card_w) // 2
+    card_y = sh - card_h - 40
+
+    card = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
+    pygame.draw.rect(card, (20, 22, 28, 235), (0, 0, card_w, card_h), border_radius=16)
+    pygame.draw.rect(
+        card, (230, 45, 45), (0, 0, card_w, card_h), width=3, border_radius=16
+    )
+
+    title_font = pygame.font.Font(None, 42)
+    text_font = pygame.font.Font(None, 34)
+
+    t1 = title_font.render(
+        "ESTACION CON OVERBOOKING (FIN DEL JUEGO)", True, (255, 75, 75)
+    )
+    lines_str = ", ".join(details["lines"])
+    t2 = text_font.render(
+        f"Estacion: {details['shape']} en {details['position']}  |  Lineas conectadas: {lines_str}",
+        True,
+        (240, 240, 240),
+    )
+    t3 = text_font.render(
+        f"Pasajeros esperando: {details['total_passengers']}  |  "
+        f"Retrasados (>{details['limit_s']:.0f}s): {details['overdue_count']}  |  "
+        f"Espera maxima: {details['max_wait_s']:.1f}s",
+        True,
+        (240, 240, 240),
+    )
+    comp_items = [f"{v} {k}" for k, v in details["breakdown"].items()]
+    comp_str = ", ".join(comp_items) if comp_items else "Ninguno"
+    t4 = text_font.render(
+        f"Composicion de pasajeros: {comp_str}",
+        True,
+        (255, 215, 80),
+    )
+
+    card.blit(t1, (30, 20))
+    card.blit(t2, (30, 68))
+    card.blit(t3, (30, 112))
+    card.blit(t4, (30, 158))
+
+    surface.blit(card, (card_x, card_y))
+    raw = pygame.image.tobytes(surface, "RGB")
+    return Image.frombytes("RGB", surface.get_size(), raw)
+
 
 def _frame(mediator, surface) -> Image.Image:
     """Render the live game and hand back an RGB image."""
@@ -67,6 +203,8 @@ def play(
     cap: int,
     futures: int,
     model=None,
+    fps: int = 20,
+    freeze_seconds: float = 4.0,
 ) -> tuple[list[Image.Image], dict]:
     """`futures` is REQUIRED for the same reason it is in `search_policy`.
 
@@ -136,7 +274,12 @@ def play(
         if terminated or truncated:
             break
 
-    frames.append(_frame(env._mediator, surface))
+    details = _overbooking_details(env._mediator)
+    final_frame = _annotate_final_frame(surface, env._mediator, details)
+    freeze_frames = max(1, int(fps * freeze_seconds))
+    for _ in range(freeze_frames):
+        frames.append(final_frame)
+
     mediator = env._mediator
     summary = {
         "deliveries": int(delivered),
@@ -145,6 +288,7 @@ def play(
         "lines": len(mediator.paths),
         "longest_line": max((len(p.stations) for p in mediator.paths), default=0),
         "stations": len(mediator.stations),
+        "overbooking": details,
     }
     env.close()
     pygame.quit()
@@ -166,6 +310,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--model", type=Path)
     parser.add_argument("--fps", type=int, default=20)
+    parser.add_argument(
+        "--freeze-seconds",
+        type=float,
+        default=4.0,
+        help="seconds to hold annotated final frame",
+    )
     parser.add_argument(
         "--output", type=Path, default=Path("output/semantic/playthrough.gif")
     )
@@ -191,6 +341,8 @@ def main(argv: list[str] | None = None) -> int:
         args.cap,
         args.futures,
         model,
+        fps=args.fps,
+        freeze_seconds=args.freeze_seconds,
     )
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -269,6 +421,20 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"  {summary['frames']} frames captured -> {args.output} ({size / 1e6:.1f} MB)"
     )
+    if summary.get("overbooking"):
+        ob = summary["overbooking"]
+        print("-" * 64)
+        print("ESTACION CON OVERBOOKING (FIN DEL JUEGO):")
+        print(f"  Forma: {ob['shape']}")
+        print(f"  Posición: {ob['position']}")
+        print(f"  Líneas conectadas: {', '.join(ob['lines'])}")
+        print(f"  Pasajeros esperando: {ob['total_passengers']}")
+        print(f"  Pasajeros retrasados (>{ob['limit_s']:.0f}s): {ob['overdue_count']}")
+        print(f"  Tiempo máximo de espera: {ob['max_wait_s']:.1f}s")
+        print("  Composición de pasajeros esperando:")
+        for shape, count in ob["breakdown"].items():
+            print(f"    - {shape}: {count}")
+        print("-" * 64)
     return 0
 
 
