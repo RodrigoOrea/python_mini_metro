@@ -44,10 +44,11 @@ from search_policy import (  # noqa: E402
 
 from config import screen_height, screen_width  # noqa: E402
 from rl.heuristic import choose  # noqa: E402
+from rl.heuristic_rorea import choose as choose_rorea  # noqa: E402
 from rl.semantic_env import ACTION_TABLE, SemanticMetroEnv  # noqa: E402
 from save_game import serialize_game  # noqa: E402
 
-PLAYERS = ("heuristic", "search", "model")
+PLAYERS = ("heuristic", "rorea", "search", "model")
 
 
 def _frame(mediator, surface) -> Image.Image:
@@ -91,6 +92,8 @@ def play(
 
         if player == "heuristic":
             action = choose(env)
+        elif player == "rorea":
+            action = choose_rorea(env)
         elif player == "model":
             predicted, _ = model.predict(
                 observation, action_masks=env.action_masks(), deterministic=True

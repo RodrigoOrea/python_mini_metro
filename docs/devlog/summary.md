@@ -1,3 +1,4 @@
+- 2026-11-09: Implemented `src/rl/heuristic_rorea.py` multi-line balancing heuristic by Rodrigo Orea. Discovered and resolved the single-line stagnation in the baseline heuristic where purchased line slots went unused due to greedy single-line extension; introduced uncrewed-line locomotive assignment priority, unlocked-line bootstrap with hub transfers, catching-up line extension priority, and locomotive fleet reservation. Evaluated across held-out seeds, deliveries improved from ~234 to 390.33 (+66%), with playback recording added to `scripts/record_semantic.py` and evaluation in `scripts/evaluate_semantic.py`.
 - 2026-09-05: Moved 10 historical work units (623 source files) to numbered docs/work folders; preserved original review rounds and source provenance, and updated live documentation pointers. Migration coordination: ../fleet/docs/work/3_numbered-work-docs/plan.md.
 
 ## 2026-09-03
