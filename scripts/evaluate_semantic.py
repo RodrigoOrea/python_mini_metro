@@ -136,14 +136,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=9000)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--controls-only", action="store_true")
+    parser.add_argument(
+        "--control",
+        choices=CONTROLS + ("all",),
+        default="all",
+        help="which control to evaluate (default: all)",
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args(argv)
 
     seeds = [args.seed + index for index in range(args.episodes)]
     results = []
 
+    selected_controls = CONTROLS if args.control == "all" else (args.control,)
     rng = np.random.default_rng(args.seed)
-    for name in CONTROLS:
+    for name in selected_controls:
         scores = [play_control(name, seed, rng)["score"] for seed in seeds]
         results.append(summarise(f"control:{name}", scores))
         print(
