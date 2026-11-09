@@ -2,14 +2,16 @@
 
 Core design:
 1. Line purchase: Buy a line slot as soon as affordable.
-2. Locomotive priority: Any active line with 0 locomotives immediately gets one.
+2. Locomotive priority & dynamic unassignment: Any active line with 0 locomotives
+   immediately gets one. If no spare locomotive is available in the global pool,
+   queue an unassignment from the line that currently has the most locomotives.
 3. New line bootstrap: When a line slot is unlocked, start it as soon as a new
    (or unserved) station arrives, connecting it to the nearest station (hub).
 4. Catch-up balancing: When a new line is created, all subsequent connections
    (extensions/prepends) are dedicated to the newest line until its station count
    equals that of the previous line.
-5. Fleet reservation: Prevent older lines from hoarding all locomotives, ensuring
-   subsequent lines always have at least one locomotive available.
+5. Balanced fleet allocation: Spare locomotives are assigned to the line with
+   the fewest locomotives.
 """
 
 from __future__ import annotations
@@ -54,15 +56,29 @@ def choose(env) -> int:
     if ActionKind.PURCHASE_LINE in legal:
         return legal[ActionKind.PURCHASE_LINE][0][0]
 
-    # 2. Critical: assign a locomotive to any active line that has 0 locomotives.
-    #    An uncrewed line carries nobody and will cause stations to collapse.
-    if ActionKind.ASSIGN_LOCOMOTIVE in legal:
-        for index, line_idx, _ in legal[ActionKind.ASSIGN_LOCOMOTIVE]:
-            if (
-                line_idx < len(mediator.paths)
-                and len(mediator.paths[line_idx].metros) == 0
-            ):
-                return index
+    # 2. Critical: ensure every active line has at least 1 locomotive.
+    #    If a line has 0 locomotives and none are available in inventory,
+    #    unassign one from the line with the most locomotives.
+    uncrewed = [i for i, p in enumerate(mediator.paths) if len(p.metros) == 0]
+    if uncrewed:
+        if ActionKind.ASSIGN_LOCOMOTIVE in legal:
+            for index, line_idx, _ in legal[ActionKind.ASSIGN_LOCOMOTIVE]:
+                if line_idx in uncrewed:
+                    return index
+        else:
+            any_queued = any(
+                getattr(m, "is_unassignment_queued", False) for m in mediator.metros
+            )
+            if not any_queued:
+                candidates = [
+                    p
+                    for p in mediator.paths
+                    if len(p.metros) >= 2
+                    and mediator.can_queue_locomotive_unassignment(p)
+                ]
+                if candidates:
+                    donor = max(candidates, key=lambda p: len(p.metros))
+                    mediator.queue_locomotive_unassignment(donor)
 
     # 3. If a line slot is unlocked but not created, start it as soon as an
     #    unserved station arrives. Connect it to the nearest station (transfer hub).
@@ -113,22 +129,17 @@ def choose(env) -> int:
         if pick is not None:
             return pick[1]
 
-    # 6. Fleet assignment: assign locomotives and carriages.
-    #    Reserve capacity so earlier lines don't monopolize all locomotives.
+    # 6. Fleet assignment: assign spare locomotives to the line with the fewest
+    #    locomotives, and attach carriages as available.
     if ActionKind.ASSIGN_LOCOMOTIVE in legal:
-        for index, line_idx, _ in legal[ActionKind.ASSIGN_LOCOMOTIVE]:
-            if line_idx < len(mediator.paths):
-                # If only 1 line exists, cap it at 2 locomotives so reserve exists for line 1.
-                if len(mediator.paths) == 1 and len(mediator.paths[0].metros) >= 2:
-                    continue
-                # If 2 lines exist, cap line 0 at 2 and line 1 at 1 so reserve exists for line 2.
-                if (
-                    len(mediator.paths) == 2
-                    and line_idx == 0
-                    and len(mediator.paths[0].metros) >= 2
-                ):
-                    continue
-                return index
+        valid = [
+            (len(mediator.paths[line_idx].metros), index)
+            for index, line_idx, _ in legal[ActionKind.ASSIGN_LOCOMOTIVE]
+            if line_idx < len(mediator.paths)
+        ]
+        if valid:
+            valid.sort()
+            return valid[0][1]
 
     if ActionKind.ATTACH_CARRIAGE in legal:
         return legal[ActionKind.ATTACH_CARRIAGE][0][0]
