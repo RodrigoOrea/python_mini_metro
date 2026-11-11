@@ -33,13 +33,14 @@ os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from rl.heuristic import choose  # noqa: E402
 from rl.heuristic_rorea import choose as choose_rorea  # noqa: E402
+from rl.heuristic_rorea_obj import choose as choose_rorea_obj  # noqa: E402
 from rl.semantic_env import ACTION_TABLE, ActionKind, SemanticMetroEnv  # noqa: E402
 
 # `heuristic` is the bar that matters. The other three exist to catch a policy
 # that has learned nothing: `random` and `wait` score ~0, and `oneline` builds a
 # single line and never acts again -- which every learned policy here matched to
 # within noise, so beating it says almost nothing.
-CONTROLS = ("random", "wait", "oneline", "heuristic", "rorea")
+CONTROLS = ("random", "wait", "oneline", "heuristic", "rorea", "rorea_obj")
 
 
 def _first_legal(env, kinds) -> int | None:
@@ -66,6 +67,8 @@ def play_control(name: str, seed: int, rng: np.random.Generator) -> dict:
                 action = choose(env)
             elif name == "rorea":
                 action = choose_rorea(env)
+            elif name == "rorea_obj":
+                action = choose_rorea_obj(env)
             else:
                 # Build once, crew it, then stop touching anything.
                 action = _first_legal(
