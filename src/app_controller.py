@@ -23,6 +23,7 @@ from event.mouse import MouseEvent
 from event.type import KeyboardEventType, MouseEventType
 from geometry.point import Point
 from maps import KNOWN_MAP_IDS
+from rl import live_agent_runner as live_agent
 from settings import DEFAULT_SETTINGS
 from ui.menu_screens import (
     offer_menu_layout,
@@ -67,14 +68,8 @@ def _is_key_up(event: object, key: int) -> bool:
     )
 
 
-def _mouse_up_position(event: object) -> Point | None:
-    if isinstance(event, MouseEvent) and event.event_type == MouseEventType.MOUSE_UP:
-        return event.position
-    return None
-
-
-def _mouse_down_position(event: object) -> Point | None:
-    if isinstance(event, MouseEvent) and event.event_type == MouseEventType.MOUSE_DOWN:
+def _mouse_pos(event: object, kind: MouseEventType) -> Point | None:
+    if isinstance(event, MouseEvent) and event.event_type == kind:
         return event.position
     return None
 
@@ -129,6 +124,8 @@ class AppController:
         # game's map (read live off the mediator), not the picker; Continue installs
         # the saved map and never consults the picker.
         self.current_map_id = _DEFAULT_MAP_ID
+        self.current_player_id = "human"
+        self.live_agent: live_agent.LiveAgentRunner | None = None
         self.mediator, self.renderer, self.session = build_game(self.current_map_id)
         # A cold start directly in TUTORIAL (e.g. run_game(start_state=TUTORIAL))
         # must build the seeded, game-over-suppressed tutorial and its progress,
@@ -210,29 +207,39 @@ class AppController:
 
         self.reconcile_game_over()
         self.reconcile_week_boundary()
-        if self.state is AppScreen.PLAYING:
-            self._handle_playing(event)
-        elif self.state is AppScreen.PAUSE_MENU:
-            self._handle_pause_menu(event)
-        elif self.state is AppScreen.TITLE:
-            self._handle_title(event)
-        elif self.state is AppScreen.GAME_OVER:
-            self._handle_game_over(event)
-        elif self.state is AppScreen.SETTINGS:
-            self._handle_settings(event)
-        elif self.state is AppScreen.TUTORIAL:
-            self._handle_tutorial(event)
-        elif self.state is AppScreen.OFFER:
-            self._handle_offer(event)
+        {
+            AppScreen.PLAYING: self._handle_playing,
+            AppScreen.PAUSE_MENU: self._handle_pause_menu,
+            AppScreen.TITLE: self._handle_title,
+            AppScreen.GAME_OVER: self._handle_game_over,
+            AppScreen.SETTINGS: self._handle_settings,
+            AppScreen.TUTORIAL: self._handle_tutorial,
+            AppScreen.OFFER: self._handle_offer,
+        }[self.state](event)
+
+    def _install_game(
+        self, triple: GameTriple, next_state: AppScreen, *, allow_ai: bool = True
+    ) -> None:
+        self.mediator, self.renderer, self.session = triple
+        pid = self.current_player_id
+        self.live_agent = (
+            live_agent.LiveAgentRunner(pid, self.mediator)
+            if allow_ai and pid != "human"
+            else None
+        )
+        self.notice, self.state = None, next_state
 
     def _start_new_game(self, map_id: str) -> None:
         # Build a fresh game on `map_id`. The title New Game / Enter pass the picker
         # (`current_map_id`); RESTART surfaces pass the CURRENT game's map so a
         # restart replays the same terrain, never the picker's pending choice
         # (GM-09f3 review MAJOR-1).
-        self.mediator, self.renderer, self.session = self._build_game(map_id)
-        self.notice = None
-        self.state = AppScreen.PLAYING
+        self._install_game(self._build_game(map_id), AppScreen.PLAYING)
+
+    @property
+    def current_player_label(self) -> str:
+        """Human-readable label for the selected title player mode."""
+        return live_agent.player_label(self.current_player_id)
 
     def _cycle_map(self) -> None:
         # The title map picker advances to the next map, wrapping KNOWN_MAP_IDS.
@@ -259,9 +266,7 @@ class AppController:
             self.notice = _LOAD_FAILURE_NOTICE
             return
         loaded.release_pause_reason(_MENU_REASON)
-        self.mediator, self.renderer, self.session = self._build_from(loaded)
-        self.notice = None
-        self.state = AppScreen.PLAYING
+        self._install_game(self._build_from(loaded), AppScreen.PLAYING)
 
     def _handle_playing(self, event: object) -> None:
         if _is_key_up(event, pygame.K_ESCAPE):
@@ -275,7 +280,28 @@ class AppController:
             self._autosave_save()
             self.state = AppScreen.PAUSE_MENU
             return
-        self.session.dispatch(event)
+        if self.live_agent is None or live_agent.filter_ai_playing_event(
+            self.mediator, event
+        ):
+            self.session.dispatch(event)
+
+    def _resolve_armed_click(
+        self, layout: dict[str, pygame.Rect], event: object
+    ) -> str | None:
+        pressed = _mouse_pos(event, MouseEventType.MOUSE_DOWN)
+        if pressed is not None:
+            self._armed_menu_control = next(
+                (key for key in layout if _clicked(layout, key, pressed)), None
+            )
+            return None
+        position = _mouse_pos(event, MouseEventType.MOUSE_UP)
+        if position is None:
+            return None
+        armed = self._armed_menu_control
+        self._armed_menu_control = None
+        if armed is None or not _clicked(layout, armed, position):
+            return None
+        return armed
 
     def _close_pause_menu(self, next_state: AppScreen) -> None:
         # Leaving the menu state always disarms, so a stale press can never
@@ -291,21 +317,8 @@ class AppController:
             self._close_pause_menu(AppScreen.PLAYING)
             return
         layout = pause_menu_layout(screen_width, screen_height)
-        pressed = _mouse_down_position(event)
-        if pressed is not None:
-            self._armed_menu_control = next(
-                (key for key in layout if _clicked(layout, key, pressed)), None
-            )
-            return
-        position = _mouse_up_position(event)
-        if position is None:
-            return
-        # A release fires only the control its own in-menu press armed (review
-        # F2): a bare release -- e.g. a gameplay drag that outlived the Escape
-        # -- is a no-op, and every release disarms.
-        armed = self._armed_menu_control
-        self._armed_menu_control = None
-        if armed is None or not _clicked(layout, armed, position):
+        armed = self._resolve_armed_click(layout, event)
+        if armed is None:
             return
         if armed == "resume":
             self._close_pause_menu(AppScreen.PLAYING)
@@ -330,18 +343,8 @@ class AppController:
         # click on `offer_i` chooses current_offers[i]: resolve applies it and resumes.
         offers = self.mediator.current_offers
         layout = offer_menu_layout(screen_width, screen_height, len(offers))
-        pressed = _mouse_down_position(event)
-        if pressed is not None:
-            self._armed_menu_control = next(
-                (key for key in layout if _clicked(layout, key, pressed)), None
-            )
-            return
-        position = _mouse_up_position(event)
-        if position is None:
-            return
-        armed = self._armed_menu_control
-        self._armed_menu_control = None
-        if armed is None or not _clicked(layout, armed, position):
+        armed = self._resolve_armed_click(layout, event)
+        if armed is None:
             return
         # The layout keys are exactly offer_0..offer_{len-1} and the sim is frozen
         # (offers unchanged between press and release), so `armed` is always a live
@@ -356,10 +359,10 @@ class AppController:
         if _is_key_up(event, pygame.K_RETURN):
             self._start_new_game(self.current_map_id)
             return
-        position = _mouse_up_position(event)
+        position = _mouse_pos(event, MouseEventType.MOUSE_UP)
         if position is None:
             return
-        layout = title_layout(screen_width, screen_height)
+        layout = title_layout(screen_width, screen_height, include_player=True)
         if _clicked(layout, "new_game", position):
             self._start_new_game(self.current_map_id)
         elif _clicked(layout, "continue", position):
@@ -374,6 +377,8 @@ class AppController:
             # GM-09f3: cycle the picker in place; the title stays put and the label
             # updates, and the next New Game builds the chosen map.
             self._cycle_map()
+        elif _clicked(layout, "player", position):
+            self.current_player_id = live_agent.next_player_id(self.current_player_id)
 
     def _handle_game_over(self, event: object) -> None:
         # Mirrors the historical loop-inline branch: R restarts, Escape exits,
@@ -385,7 +390,7 @@ class AppController:
                 self._autosave_delete()
                 raise SystemExit
             return
-        position = _mouse_up_position(event)
+        position = _mouse_pos(event, MouseEventType.MOUSE_UP)
         if position is None:
             return
         action = self.mediator.handle_game_over_click(position)
@@ -402,7 +407,7 @@ class AppController:
         self.state = AppScreen.SETTINGS
 
     def _handle_settings(self, event: object) -> None:
-        position = _mouse_up_position(event)
+        position = _mouse_pos(event, MouseEventType.MOUSE_UP)
         if position is None:
             return
         layout = settings_menu_layout(screen_width, screen_height)
@@ -420,16 +425,14 @@ class AppController:
 
     def _edited_settings(self, layout: dict[str, pygame.Rect], position: Point):
         current = self.current_settings
-        if _clicked(layout, "fullscreen", position):
-            return replace(current, fullscreen=not current.fullscreen)
-        if _clicked(layout, "reduced_motion", position):
-            return replace(current, reduced_motion=not current.reduced_motion)
-        if _clicked(layout, "master_volume", position):
-            return replace(current, master_volume=_cycle_volume(current.master_volume))
-        if _clicked(layout, "music_volume", position):
-            return replace(current, music_volume=_cycle_volume(current.music_volume))
-        if _clicked(layout, "sfx_volume", position):
-            return replace(current, sfx_volume=_cycle_volume(current.sfx_volume))
+        for field in ("fullscreen", "reduced_motion"):
+            if _clicked(layout, field, position):
+                return replace(current, **{field: not getattr(current, field)})
+        for field in ("master_volume", "music_volume", "sfx_volume"):
+            if _clicked(layout, field, position):
+                return replace(
+                    current, **{field: _cycle_volume(getattr(current, field))}
+                )
         return None
 
     def _start_tutorial(self) -> None:
@@ -438,10 +441,8 @@ class AppController:
         # autosaves and never records a high score.
         if self._build_tutorial is None:
             return
-        self.mediator, self.renderer, self.session = self._build_tutorial()
+        self._install_game(self._build_tutorial(), AppScreen.TUTORIAL, allow_ai=False)
         self._tutorial_progress = tutorial.start_progress(self.mediator)
-        self.notice = None
-        self.state = AppScreen.TUTORIAL
 
     def _handle_tutorial(self, event: object) -> None:
         if _is_key_up(event, pygame.K_ESCAPE):
@@ -468,6 +469,14 @@ class AppController:
             elapsed_ms,
             bool(getattr(self.mediator, "is_paused", False)),
         )
+
+    def advance_live_agent(self, steps_advanced: int) -> None:
+        """Auto-resolve weekly offers and drive gameplay when AI player is active."""
+        live_agent.advance_controller(self, AppScreen, steps_advanced)
+
+    def live_agent_hud(self) -> dict[str, object] | None:
+        """Return live AI HUD summary dict when driving, or None in human mode."""
+        return None if self.live_agent is None else self.live_agent.hud_summary()
 
     def tutorial_overlay(self) -> tuple[str, int, int, bool] | None:
         """The coaching overlay data ``(prompt, ordinal, total, complete)``.

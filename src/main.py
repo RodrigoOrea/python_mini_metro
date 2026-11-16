@@ -34,6 +34,7 @@ from save_schema import SAVE_RULES_VERSION
 from settings import load_settings, save_settings
 from ui.menu_screens import (
     draw_best_indicator,
+    draw_live_agent_hud,
     draw_notice,
     draw_offer_screen,
     draw_pause_menu,
@@ -365,10 +366,11 @@ def run_game(
 
         state = controller.state
         session = controller.session
-        if (
-            state in (AppScreen.TITLE, AppScreen.SETTINGS)
-            or session is not previous_session
-        ):
+        same_session = session is previous_session
+        steps_before = (
+            getattr(controller.mediator, "steps", None) if same_session else None
+        )
+        if state in (AppScreen.TITLE, AppScreen.SETTINGS) or not same_session:
             advance = session.advance(0)
         else:
             advance = session.advance(elapsed_ms)
@@ -385,6 +387,13 @@ def run_game(
         # promotes to GAME_OVER, never to an offer; promotes a pending boundary to
         # the OFFER modal, cancelling any armed gesture first.
         controller.reconcile_week_boundary()
+        steps_after = getattr(controller.mediator, "steps", None)
+        steps_advanced = (
+            max(0, steps_after - steps_before)
+            if isinstance(steps_before, int) and isinstance(steps_after, int)
+            else 0
+        )
+        controller.advance_live_agent(steps_advanced)
         state = controller.state
 
         # Gameplay SFX (GM-08b): after reconcile so the promotion-frame game-over
@@ -399,7 +408,11 @@ def run_game(
 
         game_surface.fill(screen_color)
         if state == AppScreen.TITLE:
-            draw_title_screen(game_surface, current_map_id=controller.current_map_id)
+            draw_title_screen(
+                game_surface,
+                current_map_id=controller.current_map_id,
+                player_label=controller.current_player_label,
+            )
             if peek_autosave():
                 _draw_title_continue_button(game_surface)
             if controller.notice:
@@ -415,7 +428,11 @@ def run_game(
                 alpha=advance.alpha,
                 reduced_motion=controller.current_settings.reduced_motion,
             )
-            if state == AppScreen.PAUSE_MENU:
+            if state == AppScreen.PLAYING:
+                hud = controller.live_agent_hud()
+                if isinstance(hud, dict):
+                    draw_live_agent_hud(game_surface, hud)
+            elif state == AppScreen.PAUSE_MENU:
                 draw_pause_menu(game_surface)
             elif state == AppScreen.GAME_OVER:
                 # Painted after the renderer's game-over frame so the near-ceiling
