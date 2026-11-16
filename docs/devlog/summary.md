@@ -1,4 +1,10 @@
-- 2026-11-09: Implemented `src/rl/heuristic_rorea.py` multi-line balancing heuristic by Rodrigo Orea. Discovered and resolved the single-line stagnation in the baseline heuristic where purchased line slots went unused due to greedy single-line extension; introduced uncrewed-line locomotive assignment priority, unlocked-line bootstrap with hub transfers, catching-up line extension priority, and locomotive fleet reservation. Evaluated across held-out seeds, deliveries improved from ~234 to 390.33 (+66%), with playback recording added to `scripts/record_semantic.py` and evaluation in `scripts/evaluate_semantic.py`.
+## 2026-11-14
+
+- Implemented `src/rl/heuristic_rorea_global.py` (`rorea_global`) global network replanner by Rodrigo Orea, solving multi-line station ordering and inter-line rebalancing (intra-line 2-opt/relocate plus inter-line transfers and swaps) under a convex load-balanced global objective `H_global(G)` and executing beneficial line redesigns one line at a time via discrete `SemanticMetroEnv` actions (`REMOVE_LINE` -> `CONNECT` -> `EXTEND_LINE`/`PREPEND_LINE` -> `ASSIGN_LOCOMOTIVE`); registered in `scripts/evaluate_semantic.py` and `scripts/record_semantic.py`, raising 3-seed (`9000`–`9002`) mean deliveries to **895.67** ([693, 1129, 865]) vs `rorea_obj` (**740.67**) and `rorea` (**743.00**).
+
+## 2026-11-09
+
+- Implemented `src/rl/heuristic_rorea.py` multi-line balancing heuristic by Rodrigo Orea. Discovered and resolved the single-line stagnation in the baseline heuristic where purchased line slots went unused due to greedy single-line extension; introduced uncrewed-line locomotive assignment priority, unlocked-line bootstrap with hub transfers, catching-up line extension priority, and locomotive fleet reservation. Evaluated across held-out seeds, deliveries improved from ~234 to 390.33 (+66%), with playback recording added to `scripts/record_semantic.py` and evaluation in `scripts/evaluate_semantic.py`.
 - 2026-09-05: Moved 10 historical work units (623 source files) to numbered docs/work folders; preserved original review rounds and source provenance, and updated live documentation pointers. Migration coordination: ../fleet/docs/work/3_numbered-work-docs/plan.md.
 
 ## 2026-09-03

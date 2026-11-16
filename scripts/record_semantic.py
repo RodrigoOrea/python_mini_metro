@@ -47,11 +47,21 @@ from search_policy import (  # noqa: E402
 from config import screen_height, screen_width  # noqa: E402
 from rl.heuristic import choose  # noqa: E402
 from rl.heuristic_rorea import choose as choose_rorea  # noqa: E402
+from rl.heuristic_rorea_global import choose as choose_rorea_global  # noqa: E402
 from rl.heuristic_rorea_obj import choose as choose_rorea_obj  # noqa: E402
+from rl.policy_rorea_ml import choose as choose_rorea_ml  # noqa: E402
 from rl.semantic_env import ACTION_TABLE, SemanticMetroEnv  # noqa: E402
 from save_game import serialize_game  # noqa: E402
 
-PLAYERS = ("heuristic", "rorea", "rorea_obj", "search", "model")
+PLAYERS = (
+    "heuristic",
+    "rorea",
+    "rorea_obj",
+    "rorea_global",
+    "rorea_ml",
+    "search",
+    "model",
+)
 
 SHAPE_LABELS = {
     "RECT": "Square / Cuadrado",
@@ -235,6 +245,10 @@ def play(
             action = choose_rorea(env)
         elif player == "rorea_obj":
             action = choose_rorea_obj(env)
+        elif player == "rorea_global":
+            action = choose_rorea_global(env)
+        elif player == "rorea_ml":
+            action = choose_rorea_ml(env)
         elif player == "model":
             predicted, _ = model.predict(
                 observation, action_masks=env.action_masks(), deterministic=True
