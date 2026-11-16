@@ -268,7 +268,7 @@ class ContextualRoreaMLP:
 @dataclass
 class _ContextCache:
     mediator_ref: weakref.ref[Any]
-    policy_id: int
+    policy_ref: weakref.ref[ContextualRoreaMLP]
     last_decision: int
     last_update_decision: int
     topo_key: tuple[int, int, tuple[tuple[str, int], ...]]
@@ -292,7 +292,7 @@ def choose_contextual(
     stale = (
         cache is None
         or cache.mediator_ref() is not mediator
-        or cache.policy_id != id(policy)
+        or cache.policy_ref() is not policy
         or decision < cache.last_decision
         or topo != cache.topo_key
         or (decision - cache.last_update_decision) >= max(1, int(update_interval))
@@ -300,7 +300,12 @@ def choose_contextual(
     if stale:
         active_params = policy.predict_params(extract_context_features(mediator))
         cache = _ContextCache(
-            weakref.ref(mediator), id(policy), decision, decision, topo, active_params
+            weakref.ref(mediator),
+            weakref.ref(policy),
+            decision,
+            decision,
+            topo,
+            active_params,
         )
         env._rorea_ctx_cache = cache
     else:

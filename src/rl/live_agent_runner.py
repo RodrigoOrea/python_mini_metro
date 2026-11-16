@@ -231,6 +231,10 @@ def filter_ai_playing_event(mediator: object, event: object) -> bool:
     speed_buttons = getattr(mediator, "speed_buttons", ())
     if any(btn.contains(event.position) for btn in speed_buttons):
         return True
+    if event.event_type == MouseEventType.MOUSE_UP and getattr(
+        mediator, "is_mouse_down", False
+    ):
+        mediator.is_mouse_down = False
     if event.event_type == MouseEventType.MOUSE_MOTION:
         for btn in speed_buttons:
             btn.on_exit()
@@ -242,7 +246,7 @@ def advance_controller(controller: object, screen_enum: object, steps: int) -> N
     if (runner := getattr(controller, "live_agent", None)) is None:
         return
     if controller.state is screen_enum.OFFER:
-        runner.auto_resolve_offers()
-        controller.state = screen_enum.PLAYING
+        if runner.auto_resolve_offers() is not None:
+            controller.state = screen_enum.PLAYING
     if controller.state is screen_enum.PLAYING:
         runner.step(steps)
