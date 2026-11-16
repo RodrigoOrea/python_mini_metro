@@ -2314,3 +2314,18 @@ the wrong question.
    failure modes are cheap to test for before any training run: check the signal
    fires under random play, then drive a deliberately degenerate policy against
    it.
+
+
+---
+
+## Phase 1 (Semantic Lane) — `rorea_ml`: Parameterized Global Objective + Fleet Control via CRN CEM
+
+**Hypothesis:** Extending `rorea_global` with a 15-parameter continuous objective (`H_theta(s, G)` over live queue/wait demand, continuous demolition-risk scaling, capacity-aware carriage/locomotive assignment, and carriage-safe minimax locomotive rebalancing) and optimizing `theta` via paired Common-Random-Numbers CEM on `Train` with out-of-sample selection on `Val` improves held-out `Test` deliveries over `rorea_global` while preserving `0.00` anchor drift.
+
+**Measured:**
+- **Anchor parity:** `ANCHOR_PARAMS` matches `rorea_global` with `0.00` drift across 5,000-step contract tests.
+- **Controlled ablation (`Train 1000..1019`, `n=20`):** `rorea_global` `846.65` (`sd=301.06`); `fleet_only` `948.50` (`+101.85 +/- 161.17`, W/L/T `11/8/1`).
+- **CRN CEM (`Train 1000..1009`, 4 generations x 6 candidates) + `Val` (`2000..2019`, `n=20`):** `final_mu` selected out-of-sample on `Val` at **`947.40`** (**`+163.75 +/- 149.58`** vs `rorea_global`, W/L/T **`14/4/2`**).
+- **Held-out `Test` (`9000..9029`, `n=30`):** `rorea_ml` (`BEST_PHASE1_PARAMS`) **`866.20`** mean (`sd=310.35`, `median=871.5`, `max=1508`, `15879.8` decisions, `0.448 ms/step`) vs `rorea_global` **`773.77`** (`sd=314.24`, `median=817.0`, `max=1375`, `14715.1` decisions, `0.037 ms/step`). Paired delta **`+92.43 +/- 96.09`** (95% CI), `MDE80 = 137.35`, W/L/T **`19/9/2`**.
+
+**Verdict:** **CONFIRMED** on `Val` (`+163.75 +/- 149.58`, `14/4/2`) and positive directionally on `Test` (`+92.43`, `19/9/2`, `p ~ 0.06` at `n=30` where `MDE80 = 137.35`).

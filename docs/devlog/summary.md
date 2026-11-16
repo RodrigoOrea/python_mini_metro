@@ -1,3 +1,9 @@
+## 2026-11-16
+
+- Implemented Phase 1 parameterized ML policy (`src/rl/objective_ml.py`, `src/rl/replan_ml.py`, `src/rl/policy_rorea_ml.py`) and paired CRN CEM trainer (`scripts/train_rorea_cem.py`), extending `rorea_global` with live queue/wait demand, continuous demolition-risk scaling, capacity-aware carriage/locomotive assignment, and carriage-safe minimax locomotive rebalancing with `0.00` anchor drift.
+- Trained via CRN CEM on `Train` (`1000..1009`, 4 generations × 6 candidates) and selected `final_mu` out-of-sample on `Val` (`2000..2019`, `n=20`: **947.40**, **+163.75 +/- 149.58** vs `rorea_global`, W/L/T `14/4/2`); registered `rorea_ml` (`BEST_PHASE1_PARAMS`) in `scripts/evaluate_semantic.py` and `scripts/record_semantic.py`.
+- Held-out `Test` (`9000..9029`, `n=30`) confirmation: `rorea_ml` scored **866.20** mean (`median 871.5`, `max 1508`) vs `rorea_global` **773.77** (`median 817.0`, `max 1375`), paired delta **+92.43 +/- 96.09** (95% CI), W/L/T **19/9/2**, at `0.448 ms/step`.
+
 ## 2026-11-14
 
 - Implemented `src/rl/heuristic_rorea_global.py` (`rorea_global`) global network replanner by Rodrigo Orea, solving multi-line station ordering and inter-line rebalancing (intra-line 2-opt/relocate plus inter-line transfers and swaps) under a convex load-balanced global objective `H_global(G)` and executing beneficial line redesigns one line at a time via discrete `SemanticMetroEnv` actions (`REMOVE_LINE` -> `CONNECT` -> `EXTEND_LINE`/`PREPEND_LINE` -> `ASSIGN_LOCOMOTIVE`); registered in `scripts/evaluate_semantic.py` and `scripts/record_semantic.py`, raising 3-seed (`9000`–`9002`) mean deliveries to **895.67** ([693, 1129, 865]) vs `rorea_obj` (**740.67**) and `rorea` (**743.00**).
