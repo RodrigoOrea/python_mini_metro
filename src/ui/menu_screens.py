@@ -7,7 +7,7 @@ touch gameplay state or game RNG.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 import pygame
 
@@ -30,7 +30,9 @@ _SETTINGS_HEADING = "SETTINGS"
 _BEST_INDICATOR_TEXT = "NEW BEST"
 _HEADING_FONT_SIZE = 96
 _TUTORIAL_SUBLINE_FONT_SIZE = 26
+_LIVE_HUD_FONT_SIZE = 26
 _HEADING_GAP = 60
+_TITLE_KEYS = ("new_game", "continue", "exit", "settings", "tutorial", "map")
 # Settings rows carry value labels ("Reduced Motion: On"), so they use a wider
 # button than the menu stacks; centering is on the screen midline regardless.
 _SETTINGS_BUTTON_WIDTH = 620
@@ -74,16 +76,20 @@ def _stacked_buttons(
     return layout
 
 
-def title_layout(width: int, height: int) -> dict[str, pygame.Rect]:
+def title_layout(
+    width: int, height: int, *, include_player: bool = False
+) -> dict[str, pygame.Rect]:
     """Deterministic, disjoint hit-test rects for the title-screen controls."""
 
     # Stacked buttons anchored to the middle slot; each new control is APPENDED
     # (Settings after GM-07c, Tutorial after GM-08c, map picker after GM-09f3) so
     # the prior rects stay byte identical, and the heading stays anchored to the
-    # first key.
+    # first key. ``include_player`` appends the Track B AI/human player slot below
+    # ``map`` while keeping default ``title_layout(w, h)`` 6-key compatible.
+    keys = (*_TITLE_KEYS, "player") if include_player else _TITLE_KEYS
     return _stacked_buttons(
         width,
-        ("new_game", "continue", "exit", "settings", "tutorial", "map"),
+        keys,
         height // 2 - game_over_button_height - game_over_button_spacing,
     )
 
@@ -128,9 +134,10 @@ def _draw_button(surface: pygame.Surface, rect: pygame.Rect, label: str) -> None
         game_over_button_border_width,
         border_radius=8,
     )
-    text = _font(font_name, game_over_hint_font_size).render(
-        label, True, game_over_text_color
-    )
+    button_font = _font(font_name, game_over_hint_font_size)
+    if button_font.size(label)[0] > rect.width - 24:
+        button_font = _font(font_name, 34)
+    text = button_font.render(label, True, game_over_text_color)
     surface.blit(text, text.get_rect(center=rect.center))
 
 
@@ -154,6 +161,7 @@ def draw_title_screen(
     surface: pygame.Surface,
     continue_available: bool = False,
     current_map_id: str = "classic",
+    player_label: str | None = "Human",
 ) -> None:
     """Paint deterministic title chrome; draw Continue only when available.
 
@@ -162,7 +170,7 @@ def draw_title_screen(
     """
 
     width, height = surface.get_size()
-    layout = title_layout(width, height)
+    layout = title_layout(width, height, include_player=player_label is not None)
     _draw_heading(surface, width, layout["new_game"].top - _HEADING_GAP, _TITLE_HEADING)
     _draw_button(surface, layout["new_game"], "New Game")
     if continue_available:
@@ -171,6 +179,48 @@ def draw_title_screen(
     _draw_button(surface, layout["settings"], "Settings")
     _draw_button(surface, layout["tutorial"], "Tutorial")
     _draw_button(surface, layout["map"], f"Map: {current_map_id.title()}")
+    if player_label is not None:
+        _draw_button(surface, layout["player"], f"Player: {player_label}")
+
+
+def draw_live_agent_hud(
+    surface: pygame.Surface, hud_summary: Mapping[str, object] | None
+) -> None:
+    """Paint a compact top-right status card when an AI player is driving."""
+    if not hud_summary or hud_summary.get("player_id") == "human":
+        return
+    width, _ = surface.get_size()
+    label = str(hud_summary.get("label", "AI"))
+    deliveries = int(hud_summary.get("deliveries", 0))
+    decisions = int(hud_summary.get("decisions", 0))
+    infer_ms = float(hud_summary.get("infer_ms", 0.0))
+    last_action = str(hud_summary.get("last_action", "WAIT"))
+    lines = (
+        f"AI: {label}",
+        f"Deliveries: {deliveries}   Dec: {decisions}",
+        f"Infer: {infer_ms:.2f}ms   Act: {last_action}",
+    )
+    hud_font = _font(font_name, _LIVE_HUD_FONT_SIZE)
+    rendered = [hud_font.render(line, True, game_over_text_color) for line in lines]
+    pad_x, pad_y, line_gap = 16, 12, 6
+    content_w = max(item.get_width() for item in rendered)
+    content_h = sum(item.get_height() for item in rendered) + line_gap * (
+        len(rendered) - 1
+    )
+    panel = pygame.Rect(0, 20, content_w + 2 * pad_x, content_h + 2 * pad_y)
+    panel.right = width - 20
+    pygame.draw.rect(surface, game_over_button_color, panel, border_radius=8)
+    pygame.draw.rect(
+        surface,
+        game_over_button_border_color,
+        panel,
+        game_over_button_border_width,
+        border_radius=8,
+    )
+    cursor_y = panel.top + pad_y
+    for item in rendered:
+        surface.blit(item, (panel.left + pad_x, cursor_y))
+        cursor_y += item.get_height() + line_gap
 
 
 def draw_notice(surface: pygame.Surface, message: str) -> None:
