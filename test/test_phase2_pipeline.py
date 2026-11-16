@@ -132,6 +132,12 @@ class TestPhase2PyTorchPipeline(unittest.TestCase):
             build_rl_splits(build_parser().parse_args(["--train-seed-base", "2000"]))
         with self.assertRaises(ValueError):
             build_rl_splits(build_parser().parse_args(["--eval-seed-base", "9000"]))
+        with self.assertRaises(ValueError):
+            rl_main(["--final-std", "0.0"])
+        with self.assertRaises(ValueError):
+            rl_main(["--gamma", "0.0"])
+        with self.assertRaises(ValueError):
+            rl_main(["--updates", "0"])
 
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -156,6 +162,8 @@ class TestPhase2PyTorchPipeline(unittest.TestCase):
             self.assertEqual(rc_il, 0)
             il_pt, il_json = il_dir / "best_il.pt", il_dir / "model.json"
             self.assertTrue(il_pt.exists() and il_json.exists())
+            with self.assertRaises(ValueError):
+                rl_main(["--il-ckpt", str(il_pt), "--hidden-dim", "64"])
             il_hist = json.loads(
                 (il_dir / "il_history.json").read_text(encoding="utf-8")
             )

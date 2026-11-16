@@ -37,13 +37,42 @@ VAL_SEEDS = frozenset(range(2000, 2020))
 TEST_FORBIDDEN = frozenset(range(9000, 9030))
 _LOG_2PI = math.log(2.0 * math.pi)
 _FLAGS = (
-    "hidden-dim:i:32 updates:i:20 episodes-per-update:i:12 train-seed-base:i:1000 "
+    "updates:i:20 episodes-per-update:i:12 train-seed-base:i:1000 "
     "train-pool-size:i:24 eval-seed-base:i:2000 eval-every:i:5 update-interval:i:100 "
     "max-decisions:i:200000 ppo-epochs:i:4 batch-size:i:64 seed:i:42 lr:f:3e-4 "
     "gamma:f:1.0 gae-lambda:f:0.98 clip-eps:f:0.15 init-std:f:0.25 final-std:f:0.05 "
     "value-coef:f:0.5 anchor-coef:f:0.02 phase1-anchor-coef:f:0.005 grad-clip:f:0.5 "
     "target-kl:f:0.05"
 ).split()
+
+
+def _validate_rl_args(args: argparse.Namespace) -> int:
+    """Validate RL hyperparameters upfront and resolve `hidden_dim`."""
+    for name in (
+        "updates",
+        "episodes_per_update",
+        "ppo_epochs",
+        "batch_size",
+        "max_decisions",
+    ):
+        if getattr(args, name) < 1:
+            raise ValueError(f"{name} must be >= 1, got {getattr(args, name)}")
+    if args.init_std <= 0.0 or args.final_std <= 0.0:
+        raise ValueError(
+            f"init_std and final_std must be > 0, got {args.init_std}, {args.final_std}"
+        )
+    if not (0.0 < args.gamma <= 1.0):
+        raise ValueError(f"gamma must be in (0, 1], got {args.gamma}")
+    if args.il_ckpt is not None:
+        if args.hidden_dim is not None:
+            raise ValueError(
+                "--hidden-dim cannot be passed with --il-ckpt (inherited from checkpoint)"
+            )
+        return 0
+    hidden = 32 if args.hidden_dim is None else int(args.hidden_dim)
+    if hidden < 1:
+        raise ValueError(f"hidden_dim must be >= 1, got {hidden}")
+    return hidden
 
 
 def _t64(arr: Any, dev: torch.device) -> torch.Tensor:
@@ -291,6 +320,7 @@ def _eval_and_log(
 
 def train_contextual_rl(args: argparse.Namespace) -> dict[str, Any]:
     """Run clipped PPO residual fine-tuning with strict Train vs Val separation."""
+    hidden_dim = _validate_rl_args(args)
     train_seeds, val_seeds = build_rl_splits(args)
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
@@ -299,7 +329,7 @@ def train_contextual_rl(args: argparse.Namespace) -> dict[str, Any]:
         load_ckpt = TorchContextualActorCritic.load_checkpoint
         model, base_p, il_extra = load_ckpt(args.il_ckpt, device=dev)
     else:
-        model = TorchContextualActorCritic(hidden_dim=args.hidden_dim).to(dev)
+        model = TorchContextualActorCritic(hidden_dim=hidden_dim).to(dev)
         base_p = ctx.BEST_PHASE1_PARAMS
     print(
         f"Loaded AC ({args.il_ckpt or 'zero_init'}, hidden={model.hidden_dim})",
@@ -379,6 +409,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--il-ckpt", type=Path, default=None)
     p.add_argument("--out-dir", type=Path, default=Path("output/phase2_rl"))
+    p.add_argument("--hidden-dim", type=int, default=None)
     p.add_argument("--eval-episodes", type=int, default=DEFAULT_EVAL_EPISODES)
     p.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 4))
     p.add_argument("--device", type=str, default="cpu")
