@@ -40,12 +40,12 @@ The game root singleton is `Main` (inherits `MonoBehaviour`, global namespace):
 
 **Normalized screen mapping**:
 
-Note that opening `GameScreen.Pause` or `GameScreen.NewAsset` also sets `Game.IsPaused = true`, so `Game.Screen` and `Game.IsOver` MUST be evaluated before checking `Game.IsPaused`.
+Note that opening `GameScreen.Pause` or `GameScreen.NewAsset` also sets `Game.IsPaused = true`, so `Game.Screen` and `Game.IsOver` MUST be evaluated before checking `Game.IsPaused`. Furthermore, when a station overcrowds, `Game.ScheduleAudioEvents` assigns `overcrowdedStation = City.OvercrowdedStation;` and `scheduledScreen = GameScreen.GameOver;` before `Game.Update()` transitions `Game.Screen` and `IsOver` flips `true`, so `game.OvercrowdedStation != null` catches imminent game over right away.
 
 | Normalized State | Exact Condition |
 | :--- | :--- |
 | `MENU` | `Main.Instance == null` or `!Main.Instance.IsInGame` or `game == null` |
-| `GAME_OVER` | `game.IsOver \|\| game.Screen == GameScreen.GameOver` |
+| `GAME_OVER` | `game.IsOver \|\| game.Screen == GameScreen.GameOver \|\| game.OvercrowdedStation != null` |
 | `WEEKLY_UPGRADE` | `game.Screen == GameScreen.NewAsset` |
 | `PAUSED` | `game.Screen == GameScreen.Pause` or (`game.Screen == GameScreen.None && game.IsPaused`) |
 | `PLAYING` | `game.Screen == GameScreen.None && !game.IsPaused && !game.IsOver` |
@@ -117,7 +117,7 @@ From `FNode.LocalToScreen` and `Futile.UpdateCameraPosition()`:
 
 1. **Futile global (`globalPos`) <-> Unity camera world**: Because `futileParams.origin = (0.5f, 0.5f)` puts `(0, 0)` at screen center and `orthographicSize = Futile.screen.height * 0.5f`, Futile global coordinates `(gx, gy)` equal Unity `Camera.main` world coordinates `(gx, gy, 0f)` (up to `Futile.screenPixelOffset` half-pixel correction).
 2. **City local -> Unity screen pixels** (bottom-left `(0, 0)` to top-right `(UnityEngine.Screen.width, UnityEngine.Screen.height)`):
-   - Via Futile directly (`FNode.LocalToScreen` when `CityLayer.IsTransformingStage == true`): `Vector2 screenBottomLeft = city.CityLayer.nodes[2].LocalToScreen(cityPos);` — or reflection-free via `Main.Instance.Scene.CityStage.LocalToScreen(cityPos)`? **Caution**: when `IsTransformingStage == true`, `CityLayer` places `scale`/`position` on `rootTransform` (either `CityStage` if `nodes[0]` was removed or `nodes[0]` — actually `Main.Instance.Scene.CityStage.LocalToScreen` transforms from `CityStage`!). Therefore the safest reflection-free path uses `city.CityLayer.LocalToGlobal(cityPos)` followed by the exact formula in `FNode.LocalToScreen`:
+   - Note that `CityLayer.nodes` is `private` (`private FContainer[] nodes = new FContainer[3];` in `CityLayer.cs`), so `city.CityLayer.nodes[2].LocalToScreen(cityPos)` requires reflecting `CityLayer.nodes`. In addition, when `IsTransformingStage == true`, `CityLayer` places pan/zoom transforms directly on `CityStage`. Therefore, the safest reflection-free path uses the public `city.CityLayer.LocalToGlobal(cityPos)` followed by the exact formula from `FNode.LocalToScreen`:
      ```csharp
      Vector2 globalPos = city.CityLayer.LocalToGlobal(cityPos);
      // Equivalent to Futile.instance.camera.WorldToScreenPoint(new Vector3(globalPos.x, globalPos.y, 0f))
@@ -256,7 +256,7 @@ In `src/rl/objective_ml.py`, `D_REF = 250.0` normalizes Euclidean station/route 
   - Emit `cur.Start.Station` first, then append `cur.End.Station` for each step.
   - Stop immediately if `cur.NextLink == line.FirstActiveLink` (for loops) or `cur.NextLink == null` (and keep a visited-link guard set against mid-edit graphs).
   - Note: a non-loop line with `N` stations has `N - 1` active `Link`s; a loop line with `N` distinct stations has `N` active `Link`s (`LastActiveLink.End.Station == FirstActiveLink.Start.Station`, with `line.IsLooping == true`).
-  - Total tunnels/bridges consumed on a line = `line.GetAssetCount(AssetType.Crossing)` (or count active links with `link.HasCrossing && !link.IsPendingMothball && link.State != LinkState.MOTHBALLED`).
+  - Total tunnels/bridges consumed on a line = count active links with `link.HasCrossing && !link.IsPendingMothball && link.State != LinkState.MOTHBALLED`. Note that `line.GetAssetCount(AssetType.Crossing)` only skips `!link.HasCrossing || link.State == LinkState.MOTHBALLED` and does **not** filter `link.IsPendingMothball` (even though setting `IsPendingMothball = true` already released the crossing in `AssetDatabase`), so manual traversal with `!link.IsPendingMothball` is safer mid-edit.
 
 ### `Train`, `Locomotive` & `Railcar`
 
@@ -340,13 +340,13 @@ Mini Metro checks crossings against `CityDefinition.ObstacleHull` (`public Obsta
   - A `Link` has `private bool hasCrossing;` (`public bool HasCrossing => hasCrossing;`).
   - Regardless of how many times a single `Link` intersects water/obstacles, **`Link.ReserveCrossing()` consumes at most ONE `AssetType.Crossing` per `Link`** (checking `game.AssetDatabase.GetAvailableAssets(AssetType.Crossing) > 0`).
   - However, note `Link.CanCross` edge case on `LinkState.DANGLING` vs concrete links: for concrete placement validation, `LinkBuilder.ConfigureLink` fails (`returns false`, rolling back `LinkStop.Station = null`) if crossing water while `GetAvailableAssets(AssetType.Crossing) <= 0`.
-  - **Clean non-mutating probe**: Either construct/update a `LinkFootprint` with `footprint.Update(stationA, stationB)` and call `city.HasCrossingSection(footprint)` (cheap check, crossing cost is `hasCrossing ? 1 : 0`), or use `LinkStop.PseudoStationSet(Station value)` / temporary dangling `Link` test if exact multi-track platform routing at crowded hubs must be validated too.
+  - **Clean non-mutating probe**: Construct or reuse a `LinkFootprint`, call `footprint.Update(stationA, stationB)`, and call `city.HasCrossingSection(footprint)` (cheap read-only check; crossing cost is `1` if `true`, `0` if `false`). **Caveat on `LinkStop.PseudoStationSet`**: `LinkStop.PseudoStationSet` calls `link.Configure()` and restores `station = null` / `OtherStop.Configuration`, **without** calling `link.ReleaseCrossing()`. While `ReserveCrossing()` skips `ConsumeAsset` on `LinkState.DANGLING` links, on `LinkState.PENDING` (or `ACTIVE`) links it consumes a crossing in `AssetDatabase` and leaves `hasCrossing = true` leaked; never invoke `PseudoStationSet` on `LinkState.PENDING` links.
 
 ---
 
 ## 7. Safe Mutation / RPC Execution API
 
-**Threading requirement**: Unity, `Futile`, `GoTween` (`Go.to`), `FBatchedGeoLayer`, and `AudioSystem` are strictly **main-thread-only**. Any HTTP/named-pipe/socket listener in a MonoBehaviour plugin MUST enqueue commands into a thread-safe queue and execute all reads/mutations inside `Update()` / `LateUpdate()` (e.g., on the plugin `MonoBehaviour` after checking game/screen state).
+**Threading & pre-action guard requirement**: Unity, `Futile`, `GoTween` (`Go.to`), `FBatchedGeoLayer`, and `AudioSystem` are strictly **main-thread-only**. Any HTTP/named-pipe/socket listener in a MonoBehaviour plugin MUST enqueue commands into a thread-safe queue and execute all reads/mutations inside `Update()` / `LateUpdate()` (e.g., on the plugin `MonoBehaviour` after checking game/screen state). Before executing any gameplay mutation in `ActionExecutor`, guard on `!game.IsOver && game.OvercrowdedStation == null && !game.IsScreenChangeScheduled && !game.IsLocked` (plus `game.Screen == GameScreen.None` for live-board edits in `7.1`-`7.7`, or `game.Screen == GameScreen.NewAsset` for `7.8`), because `Game.ScheduleAudioEvents` sets `overcrowdedStation` and `scheduledScreen = GameScreen.GameOver` on the audio pulse before `Game.IsOver` flips `true`.
 
 ### 7.1 Pause, Resume & Speed Control
 
@@ -355,11 +355,11 @@ Preferred UI-synced controller: **`Game.HudScreen.ClockWidget`** (`ClockWidget`)
 - `game.HudScreen.ClockWidget.TriggerVCRButtonPress(VCRButtonType.PAUSE)` -> pauses cleanly, tweens pause tint, fires `SignalVCRChange` -> `HudScreen.HandleVCRChange`, updates VCR button highlights.
 - `game.HudScreen.ClockWidget.TriggerVCRButtonPress(VCRButtonType.PLAY)` -> resumes at `1x` (`TimeScale.Single`).
 - `game.HudScreen.ClockWidget.TriggerVCRButtonPress(VCRButtonType.FAST_FORWARD)` -> resumes at `2x` (`TimeScale.Double`).
-- Also available: `ClockWidget.TogglePause()`, `ClockWidget.IncreaseSpeed()`, `ClockWidget.DecreaseSpeed()` (guard against `game.IsLocked`, `game.IsOver`, and `game.Screen != GameScreen.None`).
+- Also available: `ClockWidget.TogglePause()`, `ClockWidget.IncreaseSpeed()`, `ClockWidget.DecreaseSpeed()` (guard on `!game.IsOver && game.OvercrowdedStation == null && !game.IsScreenChangeScheduled && !game.IsLocked && game.Screen == GameScreen.None`).
 
 ### 7.2 Create a New Line Between Stations `(stationA, stationB)`
 
-Guard preconditions: `!game.IsOver && game.Screen == GameScreen.None && !game.IsLocked && stationA.CanBeConnected && stationB.CanBeConnected && stationA != stationB && game.AssetDatabase.GetAvailableAssets(AssetType.Line) > 0`.
+Guard preconditions: `!game.IsOver && game.OvercrowdedStation == null && !game.IsScreenChangeScheduled && game.Screen == GameScreen.None && !game.IsLocked && stationA.CanBeConnected && stationB.CanBeConnected && stationA != stationB && game.AssetDatabase.GetAvailableAssets(AssetType.Line) > 0`.
 
 1. Find a free slot via `int freeIndex = city.GetNextFreeLineIndex();` (checking `game.LineBuilder.IsAllocatedLine(freeIndex)` if scenario line-allocation restrictions apply; note `LineBuilder.allocatedLineIndices` is `private`), ensuring `freeIndex != -1`.
 2. Create line: `Line line = city.AddLine(stationA, freeIndex);` (`City.AddLine` consumes `AssetType.Line`, allocates `links[0]` starting at `stationA` in `DANGLING` state). Check `line != null && line.Index != -1`; if `line.Index == -1`, call `line.Remove()` and abort.
