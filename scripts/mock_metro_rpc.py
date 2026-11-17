@@ -16,15 +16,17 @@ if str(_SRC) not in sys.path:
 
 import rl.bridge_protocol as bp  # noqa: E402
 
-_SHAPES = ("CIRCLE", "TRIANGLE", "SQUARE", "STAR", "PENTAGON", "DIAMOND")
-_OFFERS = (
-    bp.WeeklyOffer(0, "new_line", "New Line"),
-    bp.WeeklyOffer(1, "carriage", "+1 Carriage"),
-    bp.WeeklyOffer(2, "tunnel", "+1 Tunnel"),
-    bp.WeeklyOffer(3, "interchange", "+1 Interchange"),
+_SHAPES = ("CIRCLE", "TRIANGLE", "SQUARE", "CROSS", "DIAMOND", "PENTAGON", "STAR")
+_OFFERS_S1 = (bp.WeeklyOffer(0, "LOCOMOTIVE", "+1 Locomotive", 1),)
+_OFFERS_S2 = (
+    bp.WeeklyOffer(0, "LINE", "New Line", 1),
+    bp.WeeklyOffer(1, "CARRIAGE", "+1 Carriage", 1),
+    bp.WeeklyOffer(2, "CROSSING", "+1 Crossing", 1),
+    bp.WeeklyOffer(3, "INTERCHANGE", "+1 Interchange", 1),
 )
-_REWARDS = {"carriage": "carriages_available", "tunnel": "tunnels_available"}
-_REWARDS |= {"interchange": "interchanges_available", "locomotive": "locos_available"}
+_REWARDS = dict.fromkeys(("LOCOMOTIVE", "SHINKANSEN", "TRAM"), "locos_available")
+_REWARDS |= {"CARRIAGE": "carriages_available", "CROSSING": "tunnels_available"}
+_REWARDS["INTERCHANGE"] = "interchanges_available"
 
 
 class MockRpcError(Exception):
@@ -71,7 +73,8 @@ class MockMetroBoard:
         self.ghost_ttl_ticks = ghost_ttl_ticks
         self.seq = self.tick_count = self.timestamp_ms = self.deliveries = 0
         self.screen = bp.ScreenKind.PLAYING
-        self.is_paused, self.speed_multiplier, self.day = False, 1.0, 1
+        self.is_paused, self.speed_multiplier, self.day = False, 1.0, 0
+        self.weekly_stage = 0
         self._next_id = {"s": 1, "l": 1, "t": 1}
         self.stations: dict[int, SimpleNamespace] = {}
         self.lines: dict[int, SimpleNamespace] = {}
@@ -173,7 +176,7 @@ class MockMetroBoard:
         for t in self.trains.values():
             a = (t.id, t.line_id, t.carriages, 6 * (1 + t.carriages), t.onboard_count)
             b = (t.is_unassignment_queued, t.is_ghost, t.is_waiting_for_locomotive)
-            trs.append(bp.TrainSnapshot(*a, *b, t.loco_type))
+            trs.append(bp.TrainSnapshot(*a, *b, t.loco_type, t.is_pending))
         h1 = (self.seq, self.timestamp_ms, self.screen, self.city_id, self.is_paused)
         h2 = (self.speed_multiplier, self.deliveries, self.day)
         cam = bp.CameraSnapshot(0.0, 0.0, 540.0, 1920, 1080, 1.0)
@@ -211,6 +214,9 @@ class MockMetroBoard:
                 self.screen = bp.ScreenKind.PAUSED if val else bp.ScreenKind.PLAYING
         else:
             self.speed_multiplier = val
+            self.is_paused = False
+            if self.screen == bp.ScreenKind.PAUSED:
+                self.screen = bp.ScreenKind.PLAYING
 
     def _apply_action(self, act: Any) -> None:
         if self.screen == bp.ScreenKind.GAME_OVER:
@@ -231,7 +237,7 @@ class MockMetroBoard:
     def _step_tick(self) -> None:
         self.tick_count += 1
         self.timestamp_ms += int(1000 * self.speed_multiplier)
-        self.day = 1 + self.tick_count // self.ticks_per_day
+        self.day = self.tick_count // self.ticks_per_day
         if len(self.stations) < self.max_stations:
             self._spawn_station()
         for st in self.stations.values():
@@ -243,9 +249,6 @@ class MockMetroBoard:
             st.overload_ticks = st.overload_ticks + 1 if over else 0
         for tr in list(self.trains.values()):
             if tr.is_ghost or tr.is_waiting_for_locomotive:
-                continue
-            if tr.is_unassignment_queued:
-                self._release_train(tr.id)
                 continue
             sids = self.lines[tr.line_id].station_ids
             shapes = {self.stations[s].shape for s in sids}
@@ -266,9 +269,12 @@ class MockMetroBoard:
                 self.inv["lines_available"] += 1
                 del self.lines[ln_id]
         if self.ticks_per_week > 0 and self.tick_count % self.ticks_per_week == 0:
-            self.screen, self.is_paused = bp.ScreenKind.WEEKLY_UPGRADE, True
-            self.inv["locos_available"] += 1
-            self.weekly_offers = list(_OFFERS)
+            self.screen, self.is_paused, self.weekly_stage = (
+                bp.ScreenKind.WEEKLY_UPGRADE,
+                True,
+                1,
+            )
+            self.weekly_offers = list(_OFFERS_S1)
 
     def _release_train(self, tid: int) -> None:
         tr = self.trains.pop(tid)
@@ -350,7 +356,14 @@ class MockMetroBoard:
             _err(bp.ErrorCode.INSUFFICIENT_RESOURCES, "No locos available")
         self.inv["locos_available"] -= 1
         tid = self._alloc("t")
-        d = dict(id=tid, line_id=ln.id, carriages=0, onboard_count=0, is_ghost=False)
+        d = dict(
+            id=tid,
+            line_id=ln.id,
+            carriages=0,
+            onboard_count=0,
+            is_ghost=False,
+            is_pending=False,
+        )
         self.trains[tid] = SimpleNamespace(
             **d,
             is_unassignment_queued=False,
@@ -358,19 +371,10 @@ class MockMetroBoard:
             loco_type="LOCOMOTIVE",
         )
 
-    def _act_unassign_loco(self, act: bp.UnassignLocoAction) -> None:
-        tr = self._pick_train(self._line(act.line_id).id, act.train_id)
-        if tr.onboard_count == 0:
-            del self.trains[tr.id]
-            self.inv["locos_available"] += 1
-            self.inv["carriages_available"] += tr.carriages
-        else:
-            tr.is_unassignment_queued = True
-
     def _act_relocate_loco(self, act: bp.RelocateLocoAction) -> None:
         src, dst = self._line(act.source_line_id), self._line(act.target_line_id)
         tr = self._pick_train(src.id, act.train_id)
-        tr.line_id, tr.onboard_count, tr.is_unassignment_queued = dst.id, 0, False
+        tr.line_id, tr.onboard_count, tr.is_pending = dst.id, 0, False
 
     def _act_attach_carriage(self, act: bp.AttachCarriageAction) -> None:
         ln = self._line(act.line_id)
@@ -397,11 +401,16 @@ class MockMetroBoard:
         )
         if offer is None:
             _err(bp.ErrorCode.INVALID_ARGS, f"Invalid offer {act.offer_index}")
-        if offer.kind == "new_line":
-            self.inv["lines_total"] += 1
-            self.inv["lines_available"] += 1
+        if offer.kind == "LINE":
+            self.inv["lines_total"] += offer.count
+            self.inv["lines_available"] += offer.count
         elif key := _REWARDS.get(offer.kind):
-            self.inv[key] += 1
+            self.inv[key] += offer.count
+        if self.weekly_stage == 1:
+            self.weekly_stage = 2
+            self.weekly_offers = list(_OFFERS_S2)
+            return
+        self.weekly_stage = 0
         self.weekly_offers.clear()
         self.is_paused, self.screen = False, bp.ScreenKind.PLAYING
 
@@ -410,21 +419,18 @@ class _RpcHandler(socketserver.StreamRequestHandler):
     def handle(self) -> None:
         board: MockMetroBoard = self.server.board  # type: ignore[attr-defined]
         for raw_bytes in self.rfile:
+            resp = None
             try:
                 req = bp.RpcRequest.from_json(raw_bytes.decode("utf-8"))
                 resp = board.handle_request(req)
             except UnicodeDecodeError as e:
-                resp = bp.RpcResponse.failure(
-                    None, board.seq, bp.ErrorCode.INVALID_JSON, str(e)
-                )
+                ec, rid, msg = bp.ErrorCode.INVALID_JSON, None, str(e)
             except bp.ProtocolValidationError as e:
-                resp = bp.RpcResponse.failure(
-                    e.request_id, board.seq, e.error_code, str(e)
-                )
+                ec, rid, msg = e.error_code, e.request_id, str(e)
             except Exception as e:
-                resp = bp.RpcResponse.failure(
-                    None, board.seq, bp.ErrorCode.INTERNAL_ERROR, str(e)
-                )
+                ec, rid, msg = bp.ErrorCode.INTERNAL_ERROR, None, str(e)
+            if resp is None:
+                resp = bp.RpcResponse.failure(rid, board.seq, ec, msg)
             self.wfile.write((resp.to_json() + "\n").encode("utf-8"))
             self.wfile.flush()
 

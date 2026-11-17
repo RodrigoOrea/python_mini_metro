@@ -57,6 +57,7 @@ def _make_snapshot(n_stations: int = 24, n_lines: int = 6) -> dict[str, Any]:
             "is_ghost": False,
             "is_waiting_for_locomotive": k == 2,
             "loco_type": "SHINKANSEN" if k == 1 else "LOCOMOTIVE",
+            "is_pending": k == 2,
         }
         for k in range(1, n_lines + 1)
     ]
@@ -69,7 +70,7 @@ def _make_snapshot(n_stations: int = 24, n_lines: int = 6) -> dict[str, Any]:
         "is_paused": False,
         "speed_multiplier": 2.0,
         "deliveries": 99,
-        "day": 14,
+        "day": 0,
         "camera": {
             "center_x": 0.0,
             "center_y": 0.0,
@@ -86,13 +87,15 @@ def _make_snapshot(n_stations: int = 24, n_lines: int = 6) -> dict[str, Any]:
             "tunnels_available": 4,
             "interchanges_available": 1,
         },
-        "weekly_offers": [{"index": 0, "kind": "new_line", "label": "New Line"}],
+        "weekly_offers": [
+            {"index": 0, "kind": "LINE", "label": "New Line", "count": 1}
+        ],
         "stations": stations,
         "lines": lines,
         "trains": trains,
         "crossing_costs": [
             {"u": 1, "v": 2, "tunnels": 1},
-            {"u": 3, "v": 4, "tunnels": 2},
+            {"u": 3, "v": 4, "tunnels": 1},
         ],
     }
 
@@ -102,25 +105,32 @@ class TestBridgeProtocol(unittest.TestCase):
         self.assertEqual(bp.PROTOCOL_VERSION, "bridge-rpc-v1")
         self.assertEqual(bp.DEFAULT_HOST, "127.0.0.1")
         self.assertEqual(bp.DEFAULT_PORT, 17842)
+        self.assertEqual(bp.ALLOWED_SPEED_MULTIPLIERS, frozenset({1.0, 2.0}))
+        self.assertEqual(bp.StationShape.WEDGE.value, "WEDGE")
+        self.assertEqual(bp.OfferAssetKind.CROSSING.value, "CROSSING")
         self.assertEqual(
             bp.ErrorCode.TUNNEL_BUDGET_EXCEEDED.value, "TUNNEL_BUDGET_EXCEEDED"
         )
         self.assertEqual(bp.OpenActionKind.RELOCATE_LOCO.value, "RELOCATE_LOCO")
         self.assertEqual(bp.OpenActionKind.PLACE_INTERCHANGE.value, "PLACE_INTERCHANGE")
+        self.assertNotIn("UNASSIGN_LOCO", {m.value for m in bp.OpenActionKind})
+        self.assertFalse(hasattr(bp, "UnassignLocoAction"))
         self.assertEqual(bp.LocoType.SHINKANSEN.value, "SHINKANSEN")
         self.assertIn("SET_SPEED", {c.value for c in bp.RpcCommand})
 
     def test_large_snapshot_roundtrip_and_crossing_lookup(self) -> None:
         raw = _make_snapshot(n_stations=26, n_lines=6)
         snap = bp.Snapshot.from_dict(raw)
+        self.assertEqual(snap.day, 0)
         self.assertEqual(len(snap.stations), 26)
         self.assertEqual(len(snap.lines), 6)
         self.assertEqual(snap.stations[0].peep_capacity, 18)
         self.assertTrue(snap.trains[1].is_waiting_for_locomotive)
+        self.assertTrue(snap.trains[1].is_pending)
         self.assertEqual(snap.trains[0].loco_type, "SHINKANSEN")
         self.assertEqual(snap.crossing_cost(1, 2), 1)
         self.assertEqual(snap.crossing_cost(2, 1), 1)
-        self.assertEqual(snap.crossing_cost(4, 3), 2)
+        self.assertEqual(snap.crossing_cost(4, 3), 1)
         self.assertEqual(snap.crossing_cost(1, 1), 0)
         self.assertEqual(snap.crossing_cost(1, 26), 0)
 
@@ -168,14 +178,25 @@ class TestBridgeProtocol(unittest.TestCase):
         with self.assertRaises(bp.ProtocolValidationError):
             bp.Snapshot.from_dict(bad_snap)
 
+        bad_snap = _make_snapshot(4, 1)
+        bad_snap["speed_multiplier"] = 4.0
         with self.assertRaises(bp.ProtocolValidationError):
-            bp.WaitAction(ticks=True)  # type: ignore[arg-type]
-        with self.assertRaises(bp.ProtocolValidationError):
-            bp.CrossingCost(u=1, v=1, tunnels=1)
-        with self.assertRaises(bp.ProtocolValidationError):
-            bp.RpcResponse(id="1", ok=True, seq=1, error="should fail")
-        with self.assertRaises(bp.ProtocolValidationError):
-            bp.RpcResponse(id="1", ok=False, seq=1)
+            bp.Snapshot.from_dict(bad_snap)
+
+        for bad_call in (
+            lambda: bp.WaitAction(ticks=True),  # type: ignore[arg-type]
+            lambda: bp.CrossingCost(u=1, v=1, tunnels=1),
+            lambda: bp.CrossingCost(u=1, v=2, tunnels=2),
+            lambda: bp.LineSnapshot(id=1, color_index=None, station_ids=(1, 2)),
+            lambda: bp.StationSnapshot(1, 0.0, 0.0, 0.0, 0.0, "HEXAGON"),
+            lambda: bp.WaitingPassenger("HEXAGON", 100),
+            lambda: bp.WeeklyOffer(0, "new_line", "Bad", 1),
+            lambda: bp.WeeklyOffer(0, "LINE", "Zero", 0),
+            lambda: bp.RpcResponse(id="1", ok=True, seq=1, error="should fail"),
+            lambda: bp.RpcResponse(id="1", ok=False, seq=1),
+        ):
+            with self.assertRaises(bp.ProtocolValidationError):
+                bad_call()
 
     def test_open_actions_control_helpers_and_speed_validation(self) -> None:
         actions: list[bp.OpenAction] = [
@@ -187,7 +208,6 @@ class TestBridgeProtocol(unittest.TestCase):
             bp.ReplaceLineAction(line_id=1, station_ids=(1, 4, 2), is_looped=False),
             bp.RemoveLineAction(line_id=1),
             bp.AssignLocoAction(line_id=2),
-            bp.UnassignLocoAction(line_id=2, train_id=10),
             bp.RelocateLocoAction(source_line_id=2, target_line_id=3, train_id=10),
             bp.AttachCarriageAction(line_id=3),
             bp.PlaceInterchangeAction(station_id=2),
@@ -212,10 +232,10 @@ class TestBridgeProtocol(unittest.TestCase):
         with self.assertRaises(bp.ProtocolValidationError):
             bp.InsertStationAction(line_id=1, station_id=2, after_station_id=2)
 
-        for spd in (1, 2, 4, 2.0):
+        for spd in (1, 2, 1.0, 2.0):
             req = bp.set_speed_request(spd, rid=9)
             self.assertEqual(bp.parse_control_args("SET_SPEED", req.args), float(spd))
-        for bad_spd in (0, 3, -1, True, float("inf")):
+        for bad_spd in (0, 3, 4, -1, True, float("inf")):
             with self.assertRaises(bp.ProtocolValidationError):
                 bp.set_speed_request(bad_spd)  # type: ignore[arg-type]
 
@@ -240,6 +260,13 @@ class TestMockMetroRpcServer(unittest.TestCase):
     def _call(self, rw: Any, req: bp.RpcRequest) -> bp.RpcResponse:
         return self._send(rw, req.to_json())
 
+    def _act(self, rw: Any, action: bp.OpenAction, rid: str) -> bp.RpcResponse:
+        return self._call(rw, bp.action_request(action, rid))
+
+    def _snap(self, resp: bp.RpcResponse) -> bp.Snapshot:
+        self.assertTrue(resp.ok)
+        return bp.Snapshot.from_dict(resp.data["snapshot"])
+
     def test_end_to_end_tcp_rpc_and_game_mechanics(self) -> None:
         board = MockMetroBoard(
             initial_stations=8,
@@ -262,6 +289,7 @@ class TestMockMetroRpcServer(unittest.TestCase):
                     st0 = bp.Snapshot.from_dict(
                         self._call(rw, bp.get_state_request("s0")).data["snapshot"]
                     )
+                    self.assertEqual(st0.day, 0)
                     self.assertEqual(len(st0.stations), 8)
                     self.assertEqual(st0.crossing_cost(1, 2), 1)
                     self.assertEqual(st0.crossing_cost(2, 1), 1)
@@ -269,9 +297,11 @@ class TestMockMetroRpcServer(unittest.TestCase):
 
                     paused = self._call(rw, bp.set_paused_request(True, "pa1"))
                     self.assertEqual(paused.data["snapshot"]["screen"], "PAUSED")
-                    self._call(rw, bp.set_paused_request(False, "pa2"))
                     spd = self._call(rw, bp.set_speed_request(2, "sp1"))
-                    self.assertEqual(spd.data["snapshot"]["speed_multiplier"], 2.0)
+                    sp_snap = bp.Snapshot.from_dict(spd.data["snapshot"])
+                    self.assertEqual(sp_snap.speed_multiplier, 2.0)
+                    self.assertFalse(sp_snap.is_paused)
+                    self.assertEqual(sp_snap.screen, bp.ScreenKind.PLAYING)
 
                     # Connect west-bank line [1, 3] (0 tunnels), extend to 5, prepend 7
                     r = self._call(
@@ -363,65 +393,42 @@ class TestMockMetroRpcServer(unittest.TestCase):
                     self.assertEqual(snap.inventory.locos_available, 2)
                     self.assertEqual(snap.inventory.carriages_available, 2)
 
-                    # Grow past 20 stations and hit WEEKLY_UPGRADE at tick 20
-                    r = self._call(rw, bp.action_request(bp.WaitAction(ticks=18), "w2"))
-                    snap = bp.Snapshot.from_dict(r.data["snapshot"])
+                    # Grow past 20 stations and enter 2-stage WEEKLY_UPGRADE at tick 20
+                    snap = self._snap(self._act(rw, bp.WaitAction(ticks=18), "w2"))
                     self.assertGreater(len(snap.stations), 20)
                     self.assertEqual(snap.screen, bp.ScreenKind.WEEKLY_UPGRADE)
-                    self.assertGreaterEqual(len(snap.weekly_offers), 3)
-
-                    blocked = self._call(
-                        rw, bp.action_request(bp.ConnectAction((4, 6)), "blk")
+                    self.assertEqual(
+                        [o.kind for o in snap.weekly_offers], ["LOCOMOTIVE"]
                     )
+
+                    snap = self._snap(self._act(rw, bp.PickUpgradeAction(0), "up1"))
+                    self.assertEqual(snap.screen, bp.ScreenKind.WEEKLY_UPGRADE)
+                    self.assertEqual(snap.inventory.locos_available, 3)
+                    self.assertEqual(
+                        [o.kind for o in snap.weekly_offers],
+                        ["LINE", "CARRIAGE", "CROSSING", "INTERCHANGE"],
+                    )
+
+                    blocked = self._act(rw, bp.ConnectAction((4, 6)), "blk")
                     self.assertEqual(blocked.error_code, bp.ErrorCode.INVALID_STATE)
 
-                    picked = self._call(
-                        rw, bp.action_request(bp.PickUpgradeAction(0), "up0")
-                    )
-                    snap = bp.Snapshot.from_dict(picked.data["snapshot"])
+                    snap = self._snap(self._act(rw, bp.PickUpgradeAction(0), "up2"))
                     self.assertEqual(snap.screen, bp.ScreenKind.PLAYING)
                     self.assertEqual(snap.inventory.lines_total, 6)
 
-                    # Create >4 lines (5 distinct active lines) & test prepend/replace/unassign
-                    for idx, (u, v) in enumerate(
-                        ((2, 4), (4, 6), (6, 8), (8, 10)), start=1
-                    ):
-                        res = self._call(
-                            rw, bp.action_request(bp.ConnectAction((u, v)), f"ml{idx}")
-                        )
-                        self.assertTrue(res.ok)
-                    prep = self._call(
-                        rw,
-                        bp.action_request(
-                            bp.PrependLineAction(line_id=3, station_id=10), "pr3"
-                        ),
+                    # Create >4 lines (5 distinct active lines) & test prepend/replace
+                    for i, (u, v) in enumerate(((2, 4), (4, 6), (6, 8), (8, 10)), 1):
+                        self._snap(self._act(rw, bp.ConnectAction((u, v)), f"ml{i}"))
+                    prep = self._snap(self._act(rw, bp.PrependLineAction(3, 10), "pr3"))
+                    self.assertEqual(prep.lines[1].station_ids[0], 10)
+                    repl = self._snap(
+                        self._act(rw, bp.ReplaceLineAction(3, (2, 4, 6), True), "rp3")
                     )
-                    self.assertEqual(
-                        bp.Snapshot.from_dict(prep.data["snapshot"])
-                        .lines[1]
-                        .station_ids[0],
-                        10,
+                    self.assertTrue(repl.lines[1].is_looped)
+                    self._snap(self._act(rw, bp.AssignLocoAction(line_id=3), "al3"))
+                    final_snap = self._snap(
+                        self._act(rw, bp.WaitAction(ticks=2), "wd1")
                     )
-                    repl = self._call(
-                        rw,
-                        bp.action_request(
-                            bp.ReplaceLineAction(
-                                line_id=3, station_ids=(2, 4, 6), is_looped=True
-                            ),
-                            "rp3",
-                        ),
-                    )
-                    self.assertTrue(
-                        bp.Snapshot.from_dict(repl.data["snapshot"]).lines[1].is_looped
-                    )
-                    self._call(
-                        rw, bp.action_request(bp.AssignLocoAction(line_id=3), "al3")
-                    )
-                    self._call(rw, bp.action_request(bp.WaitAction(ticks=2), "wd1"))
-                    un = self._call(
-                        rw, bp.action_request(bp.UnassignLocoAction(line_id=3), "un3")
-                    )
-                    final_snap = bp.Snapshot.from_dict(un.data["snapshot"])
                     self.assertGreater(final_snap.deliveries, 0)
                     self.assertGreater(len(final_snap.lines), 4)
                     self.assertGreater(len(final_snap.stations), 20)

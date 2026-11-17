@@ -14,7 +14,7 @@ from typing import Any, Self
 PROTOCOL_VERSION = "bridge-rpc-v1"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 17842
-ALLOWED_SPEED_MULTIPLIERS = frozenset({1.0, 2.0, 4.0})
+ALLOWED_SPEED_MULTIPLIERS = frozenset({1.0, 2.0})
 EntityId = int | str
 
 
@@ -24,8 +24,7 @@ def _se(name: str, words: str) -> Any:
 
 _OAK = (
     "WAIT CONNECT EXTEND_LINE PREPEND_LINE INSERT_STATION REPLACE_LINE REMOVE_LINE "
-    "ASSIGN_LOCO UNASSIGN_LOCO RELOCATE_LOCO ATTACH_CARRIAGE PLACE_INTERCHANGE "
-    "PICK_UPGRADE"
+    "ASSIGN_LOCO RELOCATE_LOCO ATTACH_CARRIAGE PLACE_INTERCHANGE PICK_UPGRADE"
 )
 ErrorCode = _se(
     "ErrorCode",
@@ -36,6 +35,14 @@ ErrorCode = _se(
 ScreenKind = _se("ScreenKind", "MENU PLAYING PAUSED WEEKLY_UPGRADE GAME_OVER OTHER")
 Screen = ScreenKind
 LocoType = _se("LocoType", "LOCOMOTIVE SHINKANSEN TRAM")
+StationShape = _se(
+    "StationShape",
+    "CIRCLE TRIANGLE SQUARE CROSS DIAMOND EGG GEM PENTAGON STAR WEDGE",
+)
+OfferAssetKind = _se(
+    "OfferAssetKind",
+    "LINE LOCOMOTIVE SHINKANSEN TRAM FERRY CARRIAGE CROSSING INTERCHANGE",
+)
 OpenActionKind = _se("OpenActionKind", _OAK)
 RpcCommand = _se("RpcCommand", f"PING GET_STATE SET_PAUSED SET_SPEED {_OAK}")
 
@@ -50,6 +57,7 @@ class ProtocolValidationError(ValueError):
 
 _EN = {"scr": (ScreenKind, 1), "loco": (LocoType, 0), "ec": (ErrorCode, 1)}
 _EN |= {"cmd": (RpcCommand, 0), "oak": (OpenActionKind, 1)}
+_EN |= {"shp": (StationShape, 0), "oac": (OfferAssetKind, 0)}
 
 
 def _eid(v: Any) -> bool:
@@ -60,8 +68,8 @@ def _eid(v: Any) -> bool:
 def _chk(t: str, v: Any, n: str) -> Any:
     if t == "b" and isinstance(v, bool):
         return v
-    if t in ("i0", "i1") and isinstance(v, int) and not isinstance(v, bool):
-        if v >= (t == "i1"):
+    if t in ("i0", "i1", "c1") and isinstance(v, int) and not isinstance(v, bool):
+        if v >= (t != "i0") and (t != "c1" or v == 1):
             return v
     if t in ("f", "f0", "fp", "fu", "sp") and not isinstance(v, bool):
         if isinstance(v, (int, float)) and math.isfinite(x := float(v)):
@@ -141,18 +149,25 @@ _TAGS = {
     for ln in """f:center_x center_y x y screen_x screen_y
 fp:ortho_size world_to_ref_scale
 fu:overload_progress
-f0:speed_multiplier
-i1:screen_width screen_height ticks tunnels peep_capacity
+sp:speed_multiplier
+c1:tunnels
+i1:screen_width screen_height ticks count peep_capacity
 i0:lines_available lines_total locos_available carriages_available tunnels_available interchanges_available index wait_ms color_index tunnels_used carriages capacity onboard_count seq timestamp_ms deliveries day offer_index
-s:kind label dest_shape shape city_id error
-b:is_interchange is_looped is_ghost is_unassignment_queued is_paused is_waiting_for_locomotive ok
+s:label city_id error
+b:is_interchange is_looped is_ghost is_unassignment_queued is_pending is_paused is_waiting_for_locomotive ok
 id:id line_id source_line_id target_line_id u v station_id after_station_id train_id
 sids:station_ids""".splitlines()
     for fn in ln.split(":", 1)[1].split()
 }
 _TAGS |= {"screen": "scr", "loco_type": "loco", "cmd": "cmd", "error_code": "ec"}
+_TAGS |= {"shape": "shp", "dest_shape": "shp", "kind": "oac"}
 _SUB: dict[str, Any] = {}
 _OPT_R = frozenset({"id", "error_code", "error", "data"})
+_DIFF = {
+    "CrossingCost": ("u", "v"),
+    "InsertStationAction": ("station_id", "after_station_id"),
+}
+_DIFF["RelocateLocoAction"] = ("source_line_id", "target_line_id")
 
 
 class _BaseModel:
@@ -167,7 +182,8 @@ class _BaseModel:
                     ec = ErrorCode.UNSUPPORTED_PROTOCOL
                     raise ProtocolValidationError("Bad protocol", ec)
             elif v is None and (
-                fn in ("color_index", "train_id")
+                fn == "train_id"
+                or (p, fn) == ("ConnectAction", "color_index")
                 or (p == "RpcResponse" and fn in _OPT_R)
             ):
                 continue
@@ -187,12 +203,7 @@ class _BaseModel:
                     raise ProtocolValidationError(f"{p}.{fn} bad type")
                 if isinstance(s, list):
                     object.__setattr__(self, fn, sq)
-        diffs = {
-            "CrossingCost": ("u", "v"),
-            "InsertStationAction": ("station_id", "after_station_id"),
-            "RelocateLocoAction": ("source_line_id", "target_line_id"),
-        }
-        if (pr := diffs.get(p)) and getattr(self, pr[0]) == getattr(self, pr[1]):
+        if (pr := _DIFF.get(p)) and getattr(self, pr[0]) == getattr(self, pr[1]):
             raise ProtocolValidationError(f"{p}.{pr[0]} == {pr[1]}")
         if p == "InventorySnapshot" and self.lines_available > self.lines_total:  # type: ignore[attr-defined]
             raise ProtocolValidationError("lines_available > lines_total")
@@ -218,10 +229,11 @@ class _BaseModel:
         d = dict(_map(data, cls.__name__, req=req, allow=allow))
         for k in allow & _SUB.keys():
             s = _SUB[k]
-            if isinstance(s, list):
-                d[k] = tuple(s[0].from_dict(x) for x in _chk("sq", d[k], k))
-            else:
-                d[k] = s.from_dict(d[k])
+            d[k] = (
+                tuple(s[0].from_dict(x) for x in _chk("sq", d[k], k))
+                if isinstance(s, list)
+                else s.from_dict(d[k])
+            )
         return cls(**d)
 
     @classmethod
@@ -251,11 +263,12 @@ _DF |= {"emp": (), "L": "LOCOMOTIVE"}
 
 
 def _dc(name: str, spec_str: str, ns: dict[str, Any] | None = None) -> Any:
-    spec = []
-    for item in spec_str.split():
-        fn, rest = item.split(":", 1)
-        tp, eq, dv = rest.partition("=")
-        spec.append((fn, _FT[tp], _DF[dv]) if eq else (fn, _FT[tp]))
+    spec = [
+        (fn, _FT[tp], _DF[dv]) if eq else (fn, _FT[tp])
+        for it in spec_str.split()
+        for fn, rest in (it.split(":", 1),)
+        for tp, eq, dv in (rest.partition("="),)
+    ]
     return make_dataclass(
         name, spec, bases=(_BaseModel,), frozen=True, slots=True, namespace=ns
     )
@@ -263,38 +276,34 @@ def _dc(name: str, spec_str: str, ns: dict[str, Any] | None = None) -> Any:
 
 CameraSnapshot = _dc(
     "CameraSnapshot",
-    "center_x:f center_y:f ortho_size:f screen_width:i screen_height:i "
-    "world_to_ref_scale:f",
+    "center_x:f center_y:f ortho_size:f screen_width:i screen_height:i world_to_ref_scale:f",
 )
-WeeklyOffer = _dc("WeeklyOffer", "index:i kind:s label:s")
+WeeklyOffer = _dc("WeeklyOffer", "index:i kind:s label:s count:i=1")
 WaitingPassenger = _dc("WaitingPassenger", "dest_shape:s wait_ms:i")
 _FT["wp"] = tuple[WaitingPassenger, ...]
 CrossingCost = _dc("CrossingCost", "u:id v:id tunnels:i")
 InventorySnapshot = _dc(
     "InventorySnapshot",
-    "lines_available:i lines_total:i locos_available:i carriages_available:i "
-    "tunnels_available:i interchanges_available:i",
+    "lines_available:i lines_total:i locos_available:i carriages_available:i tunnels_available:i interchanges_available:i",
 )
 StationSnapshot = _dc(
     "StationSnapshot",
-    "id:id x:f y:f screen_x:f screen_y:f shape:s is_interchange:b=F "
-    "overload_progress:f=f0 waiting_passengers:wp=emp peep_capacity:i=6",
+    "id:id x:f y:f screen_x:f screen_y:f shape:s is_interchange:b=F overload_progress:f=f0 waiting_passengers:wp=emp peep_capacity:i=6",
 )
 LineSnapshot = _dc(
     "LineSnapshot",
     "id:id color_index:i station_ids:ids is_looped:b=F is_ghost:b=F tunnels_used:i=0",
 )
+LineSnapshot.__doc__ = "LineSnapshot: id is unique per instance (color_index may overlap ghosts); station_ids omits loop repeat & preserves ghost route."
 TrainSnapshot = _dc(
     "TrainSnapshot",
-    "id:id line_id:id carriages:i capacity:i onboard_count:i "
-    "is_unassignment_queued:b=F is_ghost:b=F is_waiting_for_locomotive:b=F "
-    "loco_type:s=L",
+    "id:id line_id:id carriages:i capacity:i onboard_count:i is_unassignment_queued:b=F is_ghost:b=F is_waiting_for_locomotive:b=F loco_type:s=L is_pending:b=F",
 )
 
 
 @dataclass(frozen=True, slots=True)
 class Snapshot(_BaseModel):
-    """Full board state snapshot supporting arbitrary station and line counts."""
+    """Board snapshot (day is 0-based; LineSnapshot.id is unique per instance)."""
 
     seq: int
     timestamp_ms: int
@@ -323,12 +332,9 @@ class Snapshot(_BaseModel):
     def __post_init__(self) -> None:
         super().__post_init__()
         sids, lids = {s.id for s in self.stations}, {ln.id for ln in self.lines}
-        if (
-            len({o.index for o in self.weekly_offers}) != len(self.weekly_offers)
-            or len({t.id for t in self.trains}) != len(self.trains)
-            or len(sids) != len(self.stations)
-            or len(lids) != len(self.lines)
-        ):
+        dups = len({o.index for o in self.weekly_offers}) != len(self.weekly_offers)
+        dups = dups or len({t.id for t in self.trains}) != len(self.trains)
+        if dups or len(sids) != len(self.stations) or len(lids) != len(self.lines):
             raise ProtocolValidationError("Duplicate entity id or offer index")
         bad_s = any(sid not in sids for ln in self.lines for sid in ln.station_ids)
         if bad_s or any(tr.line_id not in lids for tr in self.trains):
@@ -379,7 +385,6 @@ InsertStationAction = _act(
 ReplaceLineAction = _act("REPLACE_LINE", "line_id:id station_ids:ids is_looped:b=F")
 RemoveLineAction = _act("REMOVE_LINE", "line_id:id")
 AssignLocoAction = _act("ASSIGN_LOCO", "line_id:id")
-UnassignLocoAction = _act("UNASSIGN_LOCO", "line_id:id train_id:oid=n")
 RelocateLocoAction = _act(
     "RELOCATE_LOCO", "source_line_id:id target_line_id:id train_id:oid=n"
 )
@@ -410,25 +415,24 @@ class RpcRequest(_BaseModel):
 
     @classmethod
     def from_action(cls, a: OpenAction, rid: EntityId = "1") -> RpcRequest:
-        args = {k: v for k, v in a.to_dict().items() if v is not None}
-        return cls(id=rid, cmd=a.kind.value, args=args)
+        d = {k: v for k, v in a.to_dict().items() if v is not None}
+        return cls(rid, a.kind.value, d)
 
     @classmethod
     def ping(cls, rid: EntityId = "1") -> RpcRequest:
-        return cls(id=rid, cmd="PING")
+        return cls(rid, "PING")
 
     @classmethod
     def get_state(cls, rid: EntityId = "1") -> RpcRequest:
-        return cls(id=rid, cmd="GET_STATE")
+        return cls(rid, "GET_STATE")
 
     @classmethod
     def set_paused(cls, paused: bool, rid: EntityId = "1") -> RpcRequest:
-        return cls(id=rid, cmd="SET_PAUSED", args={"paused": _chk("b", paused, "p")})
+        return cls(rid, "SET_PAUSED", {"paused": _chk("b", paused, "p")})
 
     @classmethod
     def set_speed(cls, spd: float, rid: EntityId = "1") -> RpcRequest:
-        v = _chk("sp", spd, "speed_multiplier")
-        return cls(id=rid, cmd="SET_SPEED", args={"speed_multiplier": v})
+        return cls(rid, "SET_SPEED", {"speed_multiplier": _chk("sp", spd, "speed")})
 
 
 @dataclass(frozen=True, slots=True)
