@@ -23,12 +23,18 @@ namespace MiniMetroRoreaBridge
             if (lineRegistry == null) return Fail(req.Id, seq, BridgeErrorCodes.INTERNAL_ERROR, "LineRegistry is null");
             Game game = ResolveActiveGame();
             if (Main.Instance == null || !Main.Instance.IsInGame || game == null || game.City == null) return Fail(req.Id, seq, BridgeErrorCodes.INVALID_STATE, "No active in-game city session");
-            if (game.IsOver || game.OvercrowdedStation != null || game.Screen == GameScreen.GameOver || game.IsScreenChangeScheduled || game.IsLocked) return Fail(req.Id, seq, BridgeErrorCodes.INVALID_STATE, "Game is over, locked, or transitioning screens");
+            if (game.IsOver || game.OvercrowdedStation != null || game.Screen == GameScreen.GameOver) return Fail(req.Id, seq, BridgeErrorCodes.INVALID_STATE, "Game is over");
 
             City city = game.City;
             var args = req.Args ?? new Dictionary<string, object>(StringComparer.Ordinal);
             string cmd = req.Cmd;
+            if (cmd == BridgeCommands.WAIT)
+            {
+                RpcResponseDto waitErr = ExecuteWait(args, req.Id, seq);
+                return waitErr ?? CaptureSuccess(req.Id, seq, reader, lineRegistry);
+            }
             if (cmd == BridgeCommands.PICK_UPGRADE) return ExecutePickUpgrade(game, args, req.Id, seq) ?? CaptureSuccess(req.Id, seq, reader, lineRegistry);
+            if (game.IsScreenChangeScheduled || game.IsLocked) return Fail(req.Id, seq, BridgeErrorCodes.INVALID_STATE, "Game is locked or transitioning screens");
             if (game.Screen != GameScreen.None) return Fail(req.Id, seq, BridgeErrorCodes.INVALID_STATE, "Command requires live board state (GameScreen.None)");
 
             RpcResponseDto err = cmd switch {

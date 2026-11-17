@@ -122,15 +122,23 @@ def run_live_session(
             break
 
         upgrade_guard = 0
-        while snapshot.screen == ScreenKind.WEEKLY_UPGRADE and upgrade_guard < 8:
+        while snapshot.screen == ScreenKind.WEEKLY_UPGRADE and upgrade_guard < 25:
             upgrade_guard += 1
+            if not snapshot.weekly_offers:
+                time.sleep(0.1)
+                snapshot = client.get_state()
+                continue
             up_action = active_agent.choose_for_snapshot(snapshot, decision=step)
             if up_action is None:
                 break
-            snapshot = client.execute_action(up_action)
-            actions_taken += 1
-            upgrades_picked += 1
-            action_counts[up_action.kind.value] += 1
+            try:
+                snapshot = client.execute_action(up_action)
+                actions_taken += 1
+                upgrades_picked += 1
+                action_counts[up_action.kind.value] += 1
+            except BridgeRpcError:
+                time.sleep(0.1)
+                snapshot = client.get_state()
 
         if snapshot.screen not in (ScreenKind.PLAYING, ScreenKind.PAUSED):
             break
@@ -141,12 +149,17 @@ def run_live_session(
             break
 
         if isinstance(action, WaitAction):
-            if snapshot.is_paused and not active_agent.state.pending_actions:
-                snapshot = client.set_paused(False)
-            eff_wait = WaitAction(ticks=max(1, int(wait_ticks)))
-            snapshot = client.execute_action(eff_wait)
-            actions_taken += 1
-            action_counts[eff_wait.kind.value] += 1
+            try:
+                if snapshot.is_paused and not active_agent.state.pending_actions:
+                    snapshot = client.set_paused(False)
+                eff_wait = WaitAction(ticks=max(1, int(wait_ticks)))
+                snapshot = client.execute_action(eff_wait)
+                actions_taken += 1
+                action_counts[eff_wait.kind.value] += 1
+            except BridgeRpcError:
+                time.sleep(max(0.05, decision_interval_ms / 1000.0))
+                snapshot = client.get_state()
+                continue
             if decision_interval_ms > 0.0:
                 time.sleep(decision_interval_ms / 1000.0)
             continue

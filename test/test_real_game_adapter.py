@@ -434,6 +434,55 @@ class BridgeClientAndRunnerIntegrationTests(unittest.TestCase):
         self.assertEqual(direct["decisions"], 20)
         self.assertGreater(direct["deliveries"], 0)
 
+    def test_live_session_recovers_from_transient_transition_errors(self) -> None:
+        mk = lambda **kw: bp.Snapshot.from_dict(_sample_snapshot_dict(**kw))  # noqa: E731
+        base_snap = mk(screen="PLAYING", lines=[], trains=[])
+        empty_up = mk(screen="WEEKLY_UPGRADE", weekly_offers=[], lines=[], trains=[])
+        ready_up = mk(
+            screen="WEEKLY_UPGRADE",
+            weekly_offers=[
+                {"index": 0, "kind": "LOCOMOTIVE", "label": "Loco", "count": 1}
+            ],
+            lines=[],
+            trains=[],
+        )
+        done_snap = mk(screen="GAME_OVER", lines=[], trains=[])
+
+        class _StubClient:
+            def __init__(self) -> None:
+                self.states = [base_snap, empty_up, ready_up, done_snap]
+                self.wait_calls = 0
+
+            def ping(self) -> dict[str, object]:
+                return {"pong": True}
+
+            def get_state(self) -> bp.Snapshot:
+                return self.states.pop(0) if self.states else done_snap
+
+            def set_speed(self, spd: float) -> bp.Snapshot:
+                return base_snap
+
+            def set_paused(self, paused: bool) -> bp.Snapshot:
+                return base_snap
+
+            def execute_action(self, action: bp.OpenAction) -> bp.Snapshot:
+                if isinstance(action, bp.WaitAction):
+                    self.wait_calls += 1
+                    raise BridgeRpcError("transitioning", bp.ErrorCode.INVALID_STATE)
+                return done_snap
+
+        class _StubAgent(RealGameAgent):
+            def choose_for_snapshot(self, snapshot: bp.Snapshot, decision=None):
+                if snapshot.screen == bp.ScreenKind.WEEKLY_UPGRADE:
+                    return bp.PickUpgradeAction(0)
+                if snapshot.screen == bp.ScreenKind.PLAYING:
+                    return bp.WaitAction(ticks=1)
+                return None
+
+        res = run_live_session(_StubClient(), agent=_StubAgent(), max_decisions=5)  # type: ignore[arg-type]
+        self.assertEqual(res["upgrades_picked"], 1)
+        self.assertEqual(res["screen"], "GAME_OVER")
+
 
 if __name__ == "__main__":
     unittest.main()
