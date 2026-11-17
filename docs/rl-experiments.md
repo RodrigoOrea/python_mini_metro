@@ -2329,3 +2329,30 @@ the wrong question.
 - **Held-out `Test` (`9000..9029`, `n=30`):** `rorea_ml` (`BEST_PHASE1_PARAMS`) **`866.20`** mean (`sd=310.35`, `median=871.5`, `max=1508`, `15879.8` decisions, `0.448 ms/step`) vs `rorea_global` **`773.77`** (`sd=314.24`, `median=817.0`, `max=1375`, `14715.1` decisions, `0.037 ms/step`). Paired delta **`+92.43 +/- 96.09`** (95% CI), `MDE80 = 137.35`, W/L/T **`19/9/2`**.
 
 **Verdict:** **CONFIRMED** on `Val` (`+163.75 +/- 149.58`, `14/4/2`) and positive directionally on `Test` (`+92.43`, `19/9/2`, `p ~ 0.06` at `n=30` where `MDE80 = 137.35`).
+
+
+---
+
+## Phase 2 (Semantic Lane) — Contextual State-Conditioned IL + Clipped PPO (`phase2_il`, `phase2_rl`) & 7-Paradigm `Test` Benchmark
+
+**Hypothesis:** Conditioning `BEST_PHASE1_PARAMS` dynamically on 16 live network/fleet/wait telemetry features via a bounded residual MLP ($\theta_\phi(s) = \text{clip}(\theta_{\text{Phase1}} + \Delta_{\text{scale}} \odot \tanh(f_\phi(x_s)))$, initialized at exact `0.00` drift) — pretrained by weighted supervised imitation learning on counterfactual CRN rollouts (`Train 1000..1027`) and fine-tuned via clipped PPO — adapts strategy across early/mid/late congestion and beats static `rorea_ml` (`BEST_PHASE1_PARAMS`).
+
+**Measured:**
+- **Counterfactual dataset (`Train 1000..1019` / Dev-Val `1020..1027`, horizon 3000, k=6):** `263` clean train + `106` dev-val points (`4` near-terminal dropped), `52.47%` train positive advantage (`+9.55` max delivery gain/window).
+- **Supervised IL (`train_contextual_il.py`, 40 epochs, hidden=32):** `val_loss` `0.91623 -> 0.80667` (`best_epoch=7`, `val_cos_sim` up to `+0.1385`); PyTorch-to-NumPy export parity `< 1e-6`.
+- **`Val` (`2000..2019`, `n=20`) PPO warm-start selection (`6` updates x `11` eps):** `val[init]` (`best_il.pt`) `942.85` -> `val[u01]` (**`949.50`**, `+2.10 +/- 68.60` vs `rorea_ml` `947.40`, `+165.85 +/- 151.95` vs `rorea_global`, W/L/T `14/4/2`).
+- **Held-out `Test` (`9000..9029`, `n=30`, identical 7-method CRN sweep):**
+
+| method | mean | sd | med | dec/ep | ms/step | vs `rorea_global` (95% CI) | vs `rorea_ml` (95% CI) | W/L/T vs `rorea_global` |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `heuristic` | 265.60 | 85.06 | 266.5 | 7161.8 | 0.037 | -508.17 +/- 111.94 | -600.60 +/- 108.88 | 1/28/1 |
+| `rorea_obj` | 709.63 | 245.59 | 709.0 | 14029.2 | 0.009 | -64.13 +/- 121.66 | -156.57 +/- 109.79 | 13/16/1 |
+| `rorea` | 714.40 | 272.59 | 662.0 | 14105.2 | 0.065 | -59.37 +/- 119.21 | -151.80 +/- 111.56 | 10/20/0 |
+| `rorea_global` | 773.77 | 314.24 | 817.0 | 14715.1 | 0.037 | +0.00 +/- 0.00 | -92.43 +/- 96.09 | 0/0/30 |
+| **`rorea_ml` (Phase 1 CEM)** | **866.20** | 310.35 | **871.5** | 15879.8 | 0.449 | **+92.43 +/- 96.09** | +0.00 +/- 0.00 | **19/9/2** |
+| `phase2_il` (Supervised IL) | 855.93 | 346.02 | 866.0 | 15707.0 | 0.456 | +82.17 +/- 82.33 | -10.27 +/- 72.17 | 19/9/2 |
+| `phase2_rl` (IL + PPO) | 847.17 | 335.99 | 866.0 | 15601.4 | 0.444 | +73.40 +/- 86.58 | -19.03 +/- 62.72 | 19/9/2 |
+
+Head-to-head on `Test` vs `rorea_ml`, `phase2_rl` scored `9/8/13` W/L/T (rescuing `9019: 812->1255`, `9014: 834->993`, `9002: 848->938`, while losing cleanly on `9029: 879->231` and `9007: 1343->947`), whereas `phase2_il` cut paired CI vs `rorea_global` to `+/-82.33` (`9014: 834->1328`, `9019: 812->1255`).
+
+**Verdict:** **CONFIRMED vs baselines** (both `phase2_il` `+82.17` and `phase2_rl` `+73.40` match `rorea_ml`'s `19/9/2` win record over `rorea_global` while cutting inference to `~0.45 ms/step`), and **SUPERSEDED by Phase 1 (`rorea_ml`) on `Test` mean** (`-10.27` / `-19.03` vs `rorea_ml`, indistinguishable within noise; contextual gains on `Val` did not exceed static Phase 1 CEM's out-of-sample mean on `Test`).

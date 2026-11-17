@@ -1,3 +1,9 @@
+## 2026-11-17
+
+- Added interactive live AI demo selector to `src/ui/menu_screens.py`, `src/app_controller.py`, `src/main.py`, and `src/rl/live_agent_runner.py` (`human`, `heuristic`, `rorea`, `rorea_obj`, `rorea_global`, `rorea_ml`, and auto-detected `rorea_phase2`), preserving human-mode gameplay bit-for-bit and rendering a live HUD overlay during AI play.
+- Implemented Phase 2 contextual ML pipeline: 16-feature pure-NumPy residual MLP (`src/rl/contextual_ml.py`), counterfactual CRN snapshot dataset collector (`scripts/collect_phase2_dataset.py`, 263 train + 106 dev-val samples on `1000..1027`), PyTorch supervised IL pretrainer (`scripts/train_contextual_il.py`), and warm-started clipped PPO fine-tuner (`scripts/train_contextual_rl.py`), keeping `0.00` zero-init drift and full RL/non-RL test coverage.
+- Evaluated all 7 paradigms cleanly on held-out `Test` (`9000..9029`, `n=30`): `rorea_ml` led overall (**866.20**, `+92.43 +/- 96.09` vs `rorea_global` `773.77`, W/L/T `19/9/2`), followed by `phase2_il` (**855.93**, `+82.17 +/- 82.33`, `19/9/2`) and `phase2_rl` (**847.17**, `+73.40 +/- 86.58`, `19/9/2`; `9/8/13` vs `rorea_ml` after selecting `u01=949.50` on `Val 2000..2019`), well ahead of `rorea` (`714.40`), `rorea_obj` (`709.63`), and `heuristic` (`265.60`).
+
 ## 2026-11-16
 
 - Implemented Phase 1 parameterized ML policy (`src/rl/objective_ml.py`, `src/rl/replan_ml.py`, `src/rl/policy_rorea_ml.py`) and paired CRN CEM trainer (`scripts/train_rorea_cem.py`), extending `rorea_global` with live queue/wait demand, continuous demolition-risk scaling, capacity-aware carriage/locomotive assignment, and carriage-safe minimax locomotive rebalancing with `0.00` anchor drift.
