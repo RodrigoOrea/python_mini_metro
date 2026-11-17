@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Threading;
 using BepInEx;
 using BepInEx.Configuration;
@@ -13,17 +14,25 @@ namespace MiniMetroRoreaBridge
         private const int MaxRequestsPerFrame = 64;
         private const string StateReaderTypeName = "MiniMetroRoreaBridge.StateReader";
         private const string ActionExecutorTypeName = "MiniMetroRoreaBridge.ActionExecutor";
+        private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+        private static readonly FieldInfo MainControllerField = typeof(Main).GetField("controller", InstanceFlags);
+        private static readonly FieldInfo MenuControllerMenuField = typeof(MenuController).GetField("menu", InstanceFlags);
 
         private readonly LineRegistry _lineRegistry = new LineRegistry();
         private RpcServer _server;
         private IBridgeStateReader _stateReader;
         private IBridgeActionExecutor _actionExecutor;
         private long _seq;
+        private string _autostartCity;
+        private bool _autostartAttempted;
 
         private void Awake()
         {
             int port = ResolvePort();
             int timeoutMs = ResolveTimeoutMs();
+            string rawAutostart = Environment.GetEnvironmentVariable("MINIMETRO_BRIDGE_AUTOSTART_CITY");
+            _autostartCity = string.IsNullOrWhiteSpace(rawAutostart) ? null : rawAutostart.Trim();
 
             _stateReader = TryCreateComponent<IBridgeStateReader>(StateReaderTypeName);
             _actionExecutor = TryCreateComponent<IBridgeActionExecutor>(ActionExecutorTypeName);
@@ -40,6 +49,7 @@ namespace MiniMetroRoreaBridge
 
         private void Update()
         {
+            TryAutostartCity();
             if (_server == null) return;
             for (int i = 0; i < MaxRequestsPerFrame; i++)
             {
@@ -154,6 +164,37 @@ namespace MiniMetroRoreaBridge
         {
             ConfigEntry<int> entry = Config.Bind("Network", "MainThreadTimeoutMs", 5000, "Max milliseconds to wait for Unity main thread per RPC");
             return entry.Value > 0 ? entry.Value : 5000;
+        }
+
+        private void TryAutostartCity()
+        {
+            if (_autostartAttempted || string.IsNullOrEmpty(_autostartCity)) return;
+            Main main = Main.Instance;
+            if (main == null) return;
+            if (main.IsInGame)
+            {
+                _autostartAttempted = true;
+                return;
+            }
+            if (!(MainControllerField?.GetValue(main) is MenuController menuController)) return;
+            if (!(MenuControllerMenuField?.GetValue(menuController) is Menu menu) || menu.Option == MenuOption.None) return;
+
+            _autostartAttempted = true;
+            try
+            {
+                CityDefinition cityDef = CityDatabase.Instance[_autostartCity];
+                if (cityDef == null)
+                {
+                    Logger.LogError("Autostart city not found in CityDatabase: " + _autostartCity);
+                    return;
+                }
+                Logger.LogInfo("Autostarting classic game for city: " + cityDef.Id);
+                main.StartGame(GameMode.CLASSIC, null, cityDef);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError("Autostart city failed (" + _autostartCity + "): " + ex);
+            }
         }
     }
 }
