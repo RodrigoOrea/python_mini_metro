@@ -14,3 +14,9 @@ myenv/
 
 # Dead pre-commit sandbox residue; ACL-locked, awaiting an elevated removal
 .tmp-*-precommit/
+
+# Compiled C# mod binaries and build artifacts
+mods/**/bin/
+mods/**/obj/
+mods/**/*.dll
+mods/**/*.pdb
