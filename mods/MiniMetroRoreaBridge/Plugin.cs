@@ -17,12 +17,16 @@ namespace MiniMetroRoreaBridge
         private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
         private static readonly FieldInfo MainControllerField = typeof(Main).GetField("controller", InstanceFlags);
+        private static readonly FieldInfo GameControllerGameField = typeof(GameController).GetField("game", InstanceFlags);
         private static readonly FieldInfo MenuControllerMenuField = typeof(MenuController).GetField("menu", InstanceFlags);
 
         private readonly LineRegistry _lineRegistry = new LineRegistry();
         private RpcServer _server;
         private IBridgeStateReader _stateReader;
         private IBridgeActionExecutor _actionExecutor;
+        private AgentProcessManager _agentManager;
+        private AgentOverlayButton _agentButton;
+        private float _errorUntilTime;
         private long _seq;
         private string _autostartCity;
         private bool _autostartAttempted;
@@ -37,6 +41,15 @@ namespace MiniMetroRoreaBridge
             _stateReader = TryCreateComponent<IBridgeStateReader>(StateReaderTypeName);
             _actionExecutor = TryCreateComponent<IBridgeActionExecutor>(ActionExecutorTypeName);
 
+            ConfigEntry<string> repoEntry = Config.Bind("Agent", "RepoPath", "/home/rodrigo/python_mini_metro", "Path to python_mini_metro repository root");
+            ConfigEntry<string> pythonEntry = Config.Bind("Agent", "PythonPath", "", "Optional explicit Python executable path (defaults to <RepoPath>/.venv/bin/python)");
+            _agentManager = new AgentProcessManager(
+                repoEntry.Value,
+                pythonEntry.Value,
+                msg => Logger.LogInfo(msg),
+                msg => Logger.LogError(msg));
+            _agentButton = new AgentOverlayButton();
+
             _server = new RpcServer(
                 port: port,
                 mainThreadTimeoutMs: timeoutMs,
@@ -50,6 +63,33 @@ namespace MiniMetroRoreaBridge
         private void Update()
         {
             TryAutostartCity();
+            _agentManager?.Poll();
+            bool playingOnMap = IsPlayingOnMap();
+            if (!playingOnMap && _agentManager != null && _agentManager.IsRunning)
+                _agentManager.Stop();
+
+            if (_agentButton != null && _agentManager != null)
+            {
+                bool isRunning = _agentManager.IsRunning;
+                bool hasError = !isRunning && _errorUntilTime > Time.realtimeSinceStartup;
+                if (_agentButton.Update(playingOnMap, isRunning, hasError))
+                {
+                    if (isRunning)
+                    {
+                        _agentManager.Stop();
+                        _errorUntilTime = 0f;
+                    }
+                    else
+                    {
+                        int port = _server != null ? _server.Port : BridgeProtocol.DefaultPort;
+                        if (_agentManager.Start(port))
+                            _errorUntilTime = 0f;
+                        else
+                            _errorUntilTime = Time.realtimeSinceStartup + 3.0f;
+                    }
+                }
+            }
+
             if (_server == null) return;
             for (int i = 0; i < MaxRequestsPerFrame; i++)
             {
@@ -74,6 +114,8 @@ namespace MiniMetroRoreaBridge
 
         private void StopServer()
         {
+            _agentManager?.Stop();
+            _agentButton?.Dispose();
             RpcServer srv = _server;
             _server = null;
             if (srv != null)
@@ -81,6 +123,26 @@ namespace MiniMetroRoreaBridge
                 srv.Stop();
                 Logger.LogInfo("MiniMetroRoreaBridge TCP RPC server stopped.");
             }
+        }
+
+        private bool IsPlayingOnMap()
+        {
+            Main main = Main.Instance;
+            if (main == null || !main.IsInGame) return false;
+            Game game = null;
+            if (MainControllerField != null && GameControllerGameField != null &&
+                MainControllerField.GetValue(main) is GameController gc)
+            {
+                game = GameControllerGameField.GetValue(gc) as Game;
+            }
+            if (game == null)
+            {
+                game = DevStationView.Instance != null && DevStationView.Instance.City != null
+                    ? DevStationView.Instance.City.Game
+                    : null;
+            }
+            if (game == null || game.City == null) return false;
+            return !game.IsOver && game.OvercrowdedStation == null && game.Screen != GameScreen.GameOver;
         }
 
         private RpcResponseDto DispatchRequest(RpcRequestDto req)

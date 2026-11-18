@@ -1,3 +1,7 @@
+## 2026-11-18
+
+- Added an in-game upper-right AI agent toggle pill (`AgentOverlayButton.cs`, `AgentProcessManager.cs`, `Plugin.cs`) to `mods/MiniMetroRoreaBridge/` that appears during active map gameplay, renders distinct `AI · OFF` / `AI · ON` states with an AI sparkle-node icon and pulsing indicator, and launches/stops `scripts/play_real_metro.py --live` without a separate terminal.
+
 ## 2026-11-17
 
 - Added interactive live AI demo selector to `src/ui/menu_screens.py`, `src/app_controller.py`, `src/main.py`, and `src/rl/live_agent_runner.py` (`human`, `heuristic`, `rorea`, `rorea_obj`, `rorea_global`, `rorea_ml`, and auto-detected `rorea_phase2`), preserving human-mode gameplay bit-for-bit and rendering a live HUD overlay during AI play.
