@@ -1,4 +1,4 @@
-"""Unit tests for open-topology, tunnel-aware `rorea_ml_open` planner (`OpenAction`)."""
+"""Unit tests for open-topology, tunnel-aware `open_topology_planner` planner (`OpenAction`)."""
 
 from __future__ import annotations
 
@@ -11,8 +11,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 
 import rl.bridge_protocol as bp
 from rl.objective_ml import ANCHOR_PARAMS, BEST_PHASE1_PARAMS, compute_ml_objective
-from rl.policy_rorea_ml import choose
-from rl.rorea_ml_open import (
+from rl.open_topology_planner import (
     OpenLine,
     OpenMetroView,
     OpenPlannerState,
@@ -22,6 +21,7 @@ from rl.rorea_ml_open import (
     extract_open_demand,
     optimize_network_open,
 )
+from rl.policy_parametric_cem import choose
 from rl.semantic_env import ACTION_TABLE, ActionKind, SemanticMetroEnv
 
 
@@ -104,7 +104,7 @@ def _view_from_env(env: SemanticMetroEnv) -> OpenMetroView:
     )
 
 
-class TestRoreaMLOpenScaleAndLatency(unittest.TestCase):
+class TestOpenTopologyPlannerScaleAndLatency(unittest.TestCase):
     def test_32_stations_6_lines_decision_and_bounded_latency(self) -> None:
         shapes = ("CIRCLE", "TRIANGLE", "SQUARE", "STAR", "PENTAGON", "DIAMOND")
         sts = tuple(
@@ -180,7 +180,7 @@ class TestRoreaMLOpenScaleAndLatency(unittest.TestCase):
         self.assertLess(dt_opt, 1.0)
 
 
-class TestRoreaMLOpenTunnelGating(unittest.TestCase):
+class TestOpenTopologyPlannerTunnelGating(unittest.TestCase):
     def test_zero_tunnels_blocks_water_crossings_and_allows_same_bank(self) -> None:
         sts = (
             _st("N1", 100.0, 100.0, "CIRCLE"),
@@ -274,7 +274,7 @@ class TestRoreaMLOpenTunnelGating(unittest.TestCase):
         )
 
 
-class TestRoreaMLOpenActionsAndNonMutation(unittest.TestCase):
+class TestOpenTopologyPlannerActionsAndNonMutation(unittest.TestCase):
     def test_relocate_loco_uncrewed_and_minimax_rebalance_and_donor_guards(
         self,
     ) -> None:
@@ -453,7 +453,7 @@ class TestRoreaMLOpenActionsAndNonMutation(unittest.TestCase):
         self.assertEqual(view.lines, before_l)
 
 
-class TestRoreaMLOpenParityWithPolicyRoreaML(unittest.TestCase):
+class TestOpenTopologyPlannerParityWithParametricCEM(unittest.TestCase):
     def test_objective_and_bootstrap_decision_parity_on_standard_boards(self) -> None:
         env = SemanticMetroEnv()
         try:

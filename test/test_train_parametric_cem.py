@@ -1,4 +1,4 @@
-"""Contract tests for Phase 1 paired CEM optimizer (`scripts/train_rorea_cem.py`)."""
+"""Contract tests for Phase 1 paired CEM optimizer (`scripts/train_parametric_cem.py`)."""
 
 from __future__ import annotations
 
@@ -14,20 +14,20 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../scripts")
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
-from train_rorea_cem import (  # noqa: E402
+from train_parametric_cem import (  # noqa: E402
     DEFAULT_EVAL_EPISODES,
     cem_step,
     paired_stats,
     verify_anchor_equivalence,
 )
-from train_rorea_cem import (
+from train_parametric_cem import (
     main as train_main,
 )
 
-from rl.policy_rorea_ml import ANCHOR_PARAMS, RoreaMLParams  # noqa: E402
+from rl.policy_parametric_cem import ANCHOR_PARAMS, ParametricPolicyParams  # noqa: E402
 
 
-class TestTrainRoreaCEM(unittest.TestCase):
+class TestTrainParametricCEM(unittest.TestCase):
     def test_eval_episodes_default_respects_protocol_floor(self):
         self.assertGreaterEqual(DEFAULT_EVAL_EPISODES, 20)
 
@@ -47,7 +47,10 @@ class TestTrainRoreaCEM(unittest.TestCase):
 
     def test_cem_step_moves_mean_toward_elites_within_bounds(self):
         mu = ANCHOR_PARAMS.to_array()
-        sigma = RoreaMLParams(alpha_dist=0.2, w_fleet_wait=1.0).to_array() * 0.0 + 0.5
+        sigma = (
+            ParametricPolicyParams(alpha_dist=0.2, w_fleet_wait=1.0).to_array() * 0.0
+            + 0.5
+        )
         c1 = mu.copy()
         c2 = mu.copy()
         c2[11] = 6.0  # w_fleet_wait
@@ -63,7 +66,7 @@ class TestTrainRoreaCEM(unittest.TestCase):
             smoothing=0.5,
         )
         self.assertGreater(new_mu[11], mu[11])
-        restored = RoreaMLParams.from_array(new_mu)
+        restored = ParametricPolicyParams.from_array(new_mu)
         self.assertEqual(restored, restored.clamped())
 
     def test_end_to_end_smoke_writes_valid_artifacts(self):
@@ -95,7 +98,7 @@ class TestTrainRoreaCEM(unittest.TestCase):
             hist_path = out_dir / "history.json"
             self.assertTrue(best_path.exists())
             self.assertTrue(hist_path.exists())
-            loaded = RoreaMLParams.load(best_path)
+            loaded = ParametricPolicyParams.load(best_path)
             self.assertEqual(loaded, loaded.clamped())
             hist = json.loads(hist_path.read_text(encoding="utf-8"))
             self.assertEqual(len(hist["generations"]), 1)

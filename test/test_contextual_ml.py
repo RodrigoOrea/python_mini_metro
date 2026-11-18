@@ -31,13 +31,13 @@ from rl.contextual_ml import (  # noqa: E402
     CONTEXT_FEATURE_NAMES,
     DEFAULT_DELTA_SCALES,
     PARAM_DIM,
-    ContextualRoreaMLP,
+    ContextualResidualMLP,
     choose_contextual,
     extract_context_features,
     play_contextual,
 )
-from rl.policy_rorea_ml import choose as choose_rorea_ml  # noqa: E402
-from rl.policy_rorea_ml import play as play_rorea_ml  # noqa: E402
+from rl.policy_parametric_cem import choose as choose_parametric_cem  # noqa: E402
+from rl.policy_parametric_cem import play as play_parametric_cem  # noqa: E402
 from rl.semantic_env import SemanticMetroEnv  # noqa: E402
 
 
@@ -53,7 +53,7 @@ class TestContextualMLContract(unittest.TestCase):
             snaps.append(extract_context_features(env._mediator))
             for step_idx in range(800):
                 _, _, term, trunc, _ = env.step(
-                    choose_rorea_ml(env, BEST_PHASE1_PARAMS)
+                    choose_parametric_cem(env, BEST_PHASE1_PARAMS)
                 )
                 if step_idx in (15, 300, 550, 799) or term or trunc:
                     snaps.append(extract_context_features(env._mediator))
@@ -67,7 +67,7 @@ class TestContextualMLContract(unittest.TestCase):
         self.assertGreaterEqual(int(np.sum(mat.std(axis=0) > 1e-6)), 8)
 
     def test_zero_init_matches_best_phase1_bit_for_bit_on_seed_9000(self):
-        policy = ContextualRoreaMLP.zero_init()
+        policy = ContextualResidualMLP.zero_init()
         self.assertTrue(np.array_equal(policy.W2, np.zeros_like(policy.W2)))
         self.assertTrue(np.array_equal(policy.b2, np.zeros_like(policy.b2)))
         env_ref = SemanticMetroEnv(max_decisions=1500)
@@ -80,7 +80,7 @@ class TestContextualMLContract(unittest.TestCase):
                 x = extract_context_features(env_ctx._mediator)
                 self.assertTrue(np.array_equal(policy.predict_delta(x), np.zeros(15)))
                 self.assertEqual(policy.predict_params(x), BEST_PHASE1_PARAMS)
-                a_ref = choose_rorea_ml(env_ref, BEST_PHASE1_PARAMS)
+                a_ref = choose_parametric_cem(env_ref, BEST_PHASE1_PARAMS)
                 a_ctx = choose_contextual(env_ctx, policy, update_interval=50)
                 self.assertEqual(a_ctx, a_ref, f"Diverged at step {step_idx}")
                 _, r_ref, t_ref, tr_ref, _ = env_ref.step(a_ref)
@@ -94,7 +94,7 @@ class TestContextualMLContract(unittest.TestCase):
         finally:
             env_ref.close()
             env_ctx.close()
-        ref_ep = play_rorea_ml(1000, BEST_PHASE1_PARAMS, max_decisions=400)
+        ref_ep = play_parametric_cem(1000, BEST_PHASE1_PARAMS, max_decisions=400)
         self.assertEqual(play_contextual(1000, policy, max_decisions=400), ref_ep)
         self.assertEqual(play_contextual(1000, None, max_decisions=400), ref_ep)
 
@@ -102,7 +102,7 @@ class TestContextualMLContract(unittest.TestCase):
         rng = np.random.default_rng(123)
         x_std = np.linspace(0.1, 2.0, CONTEXT_DIM)
         x_std[8] = 0.0
-        policy = ContextualRoreaMLP.zero_init(
+        policy = ContextualResidualMLP.zero_init(
             hidden_dim=16,
             seed=7,
             x_mean=rng.uniform(0.0, 1.0, CONTEXT_DIM),
@@ -115,7 +115,7 @@ class TestContextualMLContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "ctx_policy.json"
             policy.save(path)
-            loaded = ContextualRoreaMLP.load(path)
+            loaded = ContextualResidualMLP.load(path)
         self.assertEqual(
             (loaded.base_params, loaded.hidden_dim),
             (policy.base_params, policy.hidden_dim),

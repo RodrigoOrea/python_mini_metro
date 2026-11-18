@@ -1,10 +1,10 @@
-"""Global replanning combinatorial optimization heuristic (rorea_global) by Rodrigo Orea.
+"""Global replanning combinatorial optimization heuristic (global_replan) by Rodrigo Orea.
 
 Evolution:
-1. Manual rules (`heuristic_rorea.py`): greedy endpoint attachment & fleet balancing.
-2. Objective-guided incremental (`heuristic_rorea_obj.py`): minimizes H(G) over
+1. Manual rules (`heuristic_multiline.py`): greedy endpoint attachment & fleet balancing.
+2. Objective-guided incremental (`heuristic_load_objective.py`): minimizes H(G) over
    endpoint-only actions (`CONNECT` / `EXTEND_LINE` / `PREPEND_LINE`).
-3. Global replanning (`heuristic_rorea_global.py`): solves the Transit Network Design
+3. Global replanning (`heuristic_global_replan.py`): solves the Transit Network Design
    Problem (TNDP) over the full station set via intra-line 2-opt/relocate and
    inter-line station transfers/swaps minimizing a globally balanced objective
    H_global(G) = H(G) + BalancePenalty(G), executing beneficial line redesigns
@@ -19,7 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from rl.heuristic import _distance, _served
-from rl.heuristic_rorea_obj import _extract_graph_state, compute_network_cost
+from rl.heuristic_load_objective import _extract_graph_state, compute_network_cost
 from rl.semantic_env import ACTION_TABLE, ActionKind
 
 _DEFAULT_REBUILD_COOLDOWN = 500
@@ -132,14 +132,14 @@ class _PlannerState:
 
 def _get_planner_state(env) -> _PlannerState:
     mediator = env._mediator
-    state: _PlannerState | None = getattr(env, "_rorea_global_state", None)
+    state: _PlannerState | None = getattr(env, "_global_replan_state", None)
     if (
         state is None
         or state.mediator_id != id(mediator)
         or env._decision < state.last_decision
     ):
         state = _PlannerState(mediator_id=id(mediator), last_decision=env._decision)
-        env._rorea_global_state = state
+        env._global_replan_state = state
     else:
         state.last_decision = env._decision
     return state

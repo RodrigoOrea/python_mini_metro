@@ -1,4 +1,4 @@
-"""Adapter mapping ``bridge-rpc-v1`` ``Snapshot`` objects to ``OpenMetroView`` and ``rorea_ml_open``."""
+"""Adapter mapping ``bridge-rpc-v1`` ``Snapshot`` objects to ``OpenMetroView`` and ``open_topology_planner``."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from rl.bridge_protocol import (
     StationShape,
     TrainSnapshot,
 )
-from rl.objective_ml import BEST_PHASE1_PARAMS, RoreaMLParams
-from rl.rorea_ml_open import (
+from rl.objective_ml import BEST_PHASE1_PARAMS, ParametricPolicyParams
+from rl.open_topology_planner import (
     OpenLine,
     OpenMetroView,
     OpenPlannerState,
@@ -24,7 +24,7 @@ from rl.rorea_ml_open import (
     choose_open,
 )
 
-SHAPE_TO_ROREA: dict[str, str] = {
+SHAPE_TO_SEMANTIC: dict[str, str] = {
     StationShape.CIRCLE.value: "CIRCLE",
     StationShape.TRIANGLE.value: "TRIANGLE",
     StationShape.SQUARE.value: "RECT",
@@ -38,9 +38,9 @@ SHAPE_TO_ROREA: dict[str, str] = {
 }
 
 
-def map_shape_to_rorea(shape: str) -> str:
-    """Translate a ``bridge-rpc-v1`` shape token to its ``rorea_ml`` shape token."""
-    return SHAPE_TO_ROREA.get(shape, shape)
+def map_shape_to_semantic(shape: str) -> str:
+    """Translate a ``bridge-rpc-v1`` shape token to its ``parametric_cem`` shape token."""
+    return SHAPE_TO_SEMANTIC.get(shape, shape)
 
 
 def snapshot_to_open_view(
@@ -60,9 +60,9 @@ def snapshot_to_open_view(
             id=st.id,
             x=float(st.x) * scale,
             y=float(st.y) * scale,
-            shape=map_shape_to_rorea(st.shape),
+            shape=map_shape_to_semantic(st.shape),
             waiting_dest_shapes=tuple(
-                map_shape_to_rorea(wp.dest_shape) for wp in st.waiting_passengers
+                map_shape_to_semantic(wp.dest_shape) for wp in st.waiting_passengers
             ),
             waiting_wait_ms=tuple(int(wp.wait_ms) for wp in st.waiting_passengers),
             peep_capacity=int(st.peep_capacity),
@@ -175,9 +175,9 @@ def choose_weekly_upgrade(
 
 @dataclass
 class RealGameAgent:
-    """Stateful ``rorea_ml_open`` policy wrapper for ``bridge-rpc-v1`` snapshots."""
+    """Stateful ``open_topology_planner`` policy wrapper for ``bridge-rpc-v1`` snapshots."""
 
-    params: RoreaMLParams = BEST_PHASE1_PARAMS
+    params: ParametricPolicyParams = BEST_PHASE1_PARAMS
     state: OpenPlannerState = field(default_factory=OpenPlannerState)
     decision: int = 0
     max_lines_cap: int = 7

@@ -1,4 +1,4 @@
-"""Open-topology, tunnel-aware, non-mutating `rorea_ml` planner over `OpenAction`."""
+"""Open-topology, tunnel-aware, non-mutating `parametric_cem` planner over `OpenAction`."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 import rl.bridge_protocol as bp
 import rl.objective_ml as oml
 from rl.heuristic import _distance as _d
-from rl.heuristic_rorea_global import _clears_threshold, _routes_equivalent
+from rl.heuristic_global_replan import _clears_threshold, _routes_equivalent
 from rl.objective_ml import demolition_risk_cost as _drc
 from rl.replan_ml import CRISIS_CHECK_INTERVAL, REBUILD_COOLDOWN
 

@@ -32,10 +32,10 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../src")
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from rl.heuristic import choose  # noqa: E402
-from rl.heuristic_rorea import choose as choose_rorea  # noqa: E402
-from rl.heuristic_rorea_global import choose as choose_rorea_global  # noqa: E402
-from rl.heuristic_rorea_obj import choose as choose_rorea_obj  # noqa: E402
-from rl.policy_rorea_ml import choose as choose_rorea_ml  # noqa: E402
+from rl.heuristic_global_replan import choose as choose_global_replan  # noqa: E402
+from rl.heuristic_load_objective import choose as choose_load_objective  # noqa: E402
+from rl.heuristic_multiline import choose as choose_multiline  # noqa: E402
+from rl.policy_parametric_cem import choose as choose_parametric_cem  # noqa: E402
 from rl.semantic_env import ACTION_TABLE, ActionKind, SemanticMetroEnv  # noqa: E402
 
 # `heuristic` is the bar that matters. The other three exist to catch a policy
@@ -47,10 +47,10 @@ CONTROLS = (
     "wait",
     "oneline",
     "heuristic",
-    "rorea",
-    "rorea_obj",
-    "rorea_global",
-    "rorea_ml",
+    "multiline_balancing",
+    "load_objective",
+    "global_replan",
+    "parametric_cem",
 )
 
 
@@ -76,14 +76,14 @@ def play_control(name: str, seed: int, rng: np.random.Generator) -> dict:
                 action = 0
             elif name == "heuristic":
                 action = choose(env)
-            elif name == "rorea":
-                action = choose_rorea(env)
-            elif name == "rorea_obj":
-                action = choose_rorea_obj(env)
-            elif name == "rorea_global":
-                action = choose_rorea_global(env)
-            elif name == "rorea_ml":
-                action = choose_rorea_ml(env)
+            elif name == "multiline_balancing":
+                action = choose_multiline(env)
+            elif name == "load_objective":
+                action = choose_load_objective(env)
+            elif name == "global_replan":
+                action = choose_global_replan(env)
+            elif name == "parametric_cem":
+                action = choose_parametric_cem(env)
             else:
                 # Build once, crew it, then stop touching anything.
                 action = _first_legal(

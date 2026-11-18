@@ -19,8 +19,8 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../src")
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import rl.contextual_ml as ctx  # noqa: E402
-from rl.objective_ml import BEST_PHASE1_PARAMS, PARAM_NAMES, RoreaMLParams  # noqa: E402
-from rl.policy_rorea_ml import _get_ml_state, choose  # noqa: E402
+from rl.objective_ml import BEST_PHASE1_PARAMS, PARAM_NAMES, ParametricPolicyParams  # noqa: E402
+from rl.policy_parametric_cem import _get_ml_state, choose  # noqa: E402
 from rl.replan_ml import MLPlannerState  # noqa: E402
 from rl.semantic_env import SemanticMetroEnv  # noqa: E402
 from save_game import serialize_game  # noqa: E402
@@ -68,7 +68,7 @@ def _rollout_horizon(
     var: dict,
     dec: int,
     st: MLPlannerState,
-    params: RoreaMLParams,
+    params: ParametricPolicyParams,
     horizon: int,
 ) -> float:
     env._mediator = deserialize_game(var)
@@ -77,7 +77,7 @@ def _rollout_horizon(
     new_st = MLPlannerState(mediator_id=id(env._mediator), last_decision=dec)
     for attr in _ML_ATTRS:
         setattr(new_st, attr, getattr(st, attr))
-    env._rorea_ml_state = new_st
+    env._parametric_cem_state = new_st
     total = 0.0
     for _ in range(horizon):
         _, reward, term, trunc, _ = env.step(choose(env, params))
@@ -143,7 +143,9 @@ def collect_episode(
                 feats, doc = ctx.extract_context_features(m), serialize_game(m)
                 dirs = _sample_perturbations(rng, k_perturb, perturb_std)
                 cands = [
-                    RoreaMLParams.from_array(base + ctx.DEFAULT_DELTA_SCALES * u)
+                    ParametricPolicyParams.from_array(
+                        base + ctx.DEFAULT_DELTA_SCALES * u
+                    )
                     for u in dirs
                 ]
                 eff_u = np.clip(

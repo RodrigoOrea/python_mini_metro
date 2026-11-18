@@ -1,4 +1,4 @@
-"""Contract tests for the global replanning combinatorial heuristic (rorea_global)."""
+"""Contract tests for the global replanning combinatorial heuristic (global_replan)."""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../scripts")
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
-from rl.heuristic_rorea_obj import compute_network_cost  # noqa: E402
+from rl.heuristic_load_objective import compute_network_cost  # noqa: E402
 from rl.semantic_env import ACTION_TABLE, ActionKind, SemanticMetroEnv  # noqa: E402
 
 
-class RoreaGlobalHeuristicTest(unittest.TestCase):
+class GlobalReplanHeuristicTest(unittest.TestCase):
     def test_optimize_line_order_untangles_backtracking_detour(self) -> None:
-        from rl.heuristic_rorea_global import optimize_line_order
+        from rl.heuristic_global_replan import optimize_line_order
 
         positions = [
             (100.0, 500.0),
@@ -37,7 +37,7 @@ class RoreaGlobalHeuristicTest(unittest.TestCase):
         self.assertIn(improved, ([0, 1, 2, 3], [3, 2, 1, 0]))
 
     def test_optimize_network_rebalances_stations_across_lines(self) -> None:
-        from rl.heuristic_rorea_global import optimize_network
+        from rl.heuristic_global_replan import optimize_network
 
         # Horizontal Line 0 around y=300; Station 3 sits at (500, 700) right next to Line 1,
         # while Line 0 has a massive detour down to (500, 700).
@@ -64,7 +64,7 @@ class RoreaGlobalHeuristicTest(unittest.TestCase):
         self.assertIn(3, optimized[1])
 
     def test_rebuild_executor_handles_strictly_decreasing_target_route(self) -> None:
-        from rl.heuristic_rorea_global import RebuildPlan, next_action_for_plan
+        from rl.heuristic_global_replan import RebuildPlan, next_action_for_plan
 
         env = SemanticMetroEnv()
         try:
@@ -135,7 +135,7 @@ class RoreaGlobalHeuristicTest(unittest.TestCase):
             env.close()
 
     def test_choose_acts_legally_and_resets_across_episodes(self) -> None:
-        from rl.heuristic_rorea_global import choose
+        from rl.heuristic_global_replan import choose
 
         env = SemanticMetroEnv(remove_min_age=50)
         try:
@@ -164,10 +164,10 @@ class RoreaGlobalHeuristicTest(unittest.TestCase):
     def test_registered_in_evaluate_semantic(self) -> None:
         import evaluate_semantic
 
-        self.assertIn("rorea_global", evaluate_semantic.CONTROLS)
+        self.assertIn("global_replan", evaluate_semantic.CONTROLS)
 
     def test_global_rebuild_never_orphans_bridge_line(self) -> None:
-        from rl.heuristic_rorea_global import _clears_threshold
+        from rl.heuristic_global_replan import _clears_threshold
 
         # Threshold gate must reject tiny (<12%) or negligible improvements.
         self.assertFalse(_clears_threshold(209.1, 199.1, min_abs=15.0, min_rel=0.12))
@@ -176,7 +176,7 @@ class RoreaGlobalHeuristicTest(unittest.TestCase):
     def test_eligible_lines_balanced_protects_short_stub_at_any_index(self) -> None:
         from types import SimpleNamespace
 
-        from rl.heuristic_rorea_global import _eligible_lines_balanced
+        from rl.heuristic_global_replan import _eligible_lines_balanced
 
         mediator = SimpleNamespace(
             paths=[

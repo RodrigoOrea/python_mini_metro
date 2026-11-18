@@ -1,5 +1,6 @@
 ## 2026-11-18
 
+- Renamed the `rorea_*` algorithm family, modules, scripts, tests, and internal identifiers to scientific names (`multiline_balancing`, `load_objective`, `global_replan`, `parametric_cem`, `open_topology_planner`, `contextual_residual`, `ParametricPolicyParams`, `ContextualResidualMLP`, `SHAPE_TO_SEMANTIC`).
 - Added an in-game upper-right AI agent toggle pill (`AgentOverlayButton.cs`, `AgentProcessManager.cs`, `Plugin.cs`) to `mods/MiniMetroRoreaBridge/` that appears during active map gameplay, renders distinct `AI · OFF` / `AI · ON` states with an AI sparkle-node icon and pulsing indicator, and launches/stops `scripts/play_real_metro.py --live` without a separate terminal.
 
 ## 2026-11-17

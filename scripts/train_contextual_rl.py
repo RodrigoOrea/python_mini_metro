@@ -23,13 +23,13 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from train_contextual_il import TorchContextualActorCritic  # noqa: E402
-from train_rorea_cem import paired_stats  # noqa: E402
+from train_parametric_cem import paired_stats  # noqa: E402
 
 import rl.contextual_ml as ctx  # noqa: E402
-from rl.heuristic_rorea_global import play as play_rorea_global  # noqa: E402
-from rl.objective_ml import RoreaMLParams  # noqa: E402
-from rl.policy_rorea_ml import choose as choose_rorea_ml  # noqa: E402
-from rl.policy_rorea_ml import play as play_rorea_ml  # noqa: E402
+from rl.heuristic_global_replan import play as play_global_replan  # noqa: E402
+from rl.objective_ml import ParametricPolicyParams  # noqa: E402
+from rl.policy_parametric_cem import choose as choose_parametric_cem  # noqa: E402
+from rl.policy_parametric_cem import play as play_parametric_cem  # noqa: E402
 from rl.semantic_env import SemanticMetroEnv  # noqa: E402
 
 DEFAULT_EVAL_EPISODES = 20
@@ -98,7 +98,7 @@ def build_rl_splits(args: argparse.Namespace) -> tuple[list[int], list[int]]:
 
 def _collect_rl_episode(job: tuple[Any, ...]) -> dict[str, Any]:
     ep_seed, rng_seed, p_dict, std, interval, max_dec = job
-    pol = ctx.ContextualRoreaMLP.from_dict(p_dict)
+    pol = ctx.ContextualResidualMLP.from_dict(p_dict)
     base_a, scale = pol.base_params.to_array(), pol.delta_scale
     rng, env = np.random.default_rng(rng_seed), SemanticMetroEnv(max_decisions=max_dec)
     xs, acts, lps, segs = [], [], [], []
@@ -126,12 +126,12 @@ def _collect_rl_episode(job: tuple[Any, ...]) -> dict[str, Any]:
                 nd = np.tanh(raw)
                 active = pol.base_params
                 if np.any(nd):
-                    active = RoreaMLParams.from_array(base_a + scale * nd)
+                    active = ParametricPolicyParams.from_array(base_a + scale * nd)
                 xs.append(x)
                 acts.append(raw)
                 lps.append(lp)
                 last_upd, last_topo = dec, topo
-            _, reward, term, trunc, _ = env.step(choose_rorea_ml(env, active))
+            _, reward, term, trunc, _ = env.step(choose_parametric_cem(env, active))
             r_f = float(reward)
             cur_seg += r_f
             total += r_f
@@ -160,12 +160,14 @@ def _collect_rl_episode(job: tuple[Any, ...]) -> dict[str, Any]:
 
 def _eval_worker(job: tuple[Any, ...]) -> tuple[int, float]:
     kind, seed, p_dict, max_dec, interval = job
-    if kind == "rorea_global":
-        return seed, float(play_rorea_global(seed, max_decisions=max_dec)["deliveries"])
-    if kind == "rorea_ml":
-        res = play_rorea_ml(seed, ctx.BEST_PHASE1_PARAMS, max_decisions=max_dec)
+    if kind == "global_replan":
+        return seed, float(
+            play_global_replan(seed, max_decisions=max_dec)["deliveries"]
+        )
+    if kind == "parametric_cem":
+        res = play_parametric_cem(seed, ctx.BEST_PHASE1_PARAMS, max_decisions=max_dec)
         return seed, float(res["deliveries"])
-    pol = ctx.ContextualRoreaMLP.from_dict(p_dict)
+    pol = ctx.ContextualResidualMLP.from_dict(p_dict)
     res = ctx.play_contextual(
         seed, pol, max_decisions=max_dec, update_interval=interval
     )
@@ -194,14 +196,16 @@ def _val_baselines(
     if cache.exists():
         c = json.loads(cache.read_text(encoding="utf-8"))
         if c.get("val_seeds") == seeds and c.get("max_decisions") == max_d:
-            return list(map(float, c["rorea_ml"])), list(map(float, c["rorea_global"]))
-    ml = _eval_seeds("rorea_ml", None, seeds, args)
-    gl = _eval_seeds("rorea_global", None, seeds, args)
+            return list(map(float, c["parametric_cem"])), list(
+                map(float, c["global_replan"])
+            )
+    ml = _eval_seeds("parametric_cem", None, seeds, args)
+    gl = _eval_seeds("global_replan", None, seeds, args)
     doc = {
         "val_seeds": seeds,
         "max_decisions": max_d,
-        "rorea_ml": ml,
-        "rorea_global": gl,
+        "parametric_cem": ml,
+        "global_replan": gl,
     }
     cache.write_text(json.dumps(doc, indent=2), encoding="utf-8")
     return ml, gl
@@ -301,7 +305,7 @@ def _ppo_update(
 def _eval_and_log(
     tag: str,
     model: TorchContextualActorCritic,
-    base: RoreaMLParams,
+    base: ParametricPolicyParams,
     seeds: list[int],
     baselines: tuple[list[float], list[float]],
     args: argparse.Namespace,
@@ -315,7 +319,7 @@ def _eval_and_log(
         f"  [val {tag:<5}] mean={vm['mean']:7.2f} | vs_ml={m_s} | vs_gl={g_s}",
         flush=True,
     )
-    return obj, {"tag": tag, "vs_rorea_ml": vm, "vs_rorea_global": vg}
+    return obj, {"tag": tag, "vs_parametric_cem": vm, "vs_global_replan": vg}
 
 
 def train_contextual_rl(args: argparse.Namespace) -> dict[str, Any]:

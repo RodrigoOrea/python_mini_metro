@@ -1,4 +1,4 @@
-"""Combinatorial route search and risk-gated rebuild selection for `policy_rorea_ml`."""
+"""Combinatorial route search and risk-gated rebuild selection for `policy_parametric_cem`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from rl.heuristic import _distance
-from rl.heuristic_rorea_global import (
+from rl.heuristic_global_replan import (
     RebuildPlan,
     _clears_threshold,
     _eligible_lines_balanced,
@@ -17,7 +17,7 @@ from rl.heuristic_rorea_global import (
 )
 from rl.objective_ml import (
     LiveDemandSnapshot,
-    RoreaMLParams,
+    ParametricPolicyParams,
     compute_ml_objective,
     demolition_risk_cost,
 )
@@ -47,7 +47,7 @@ def optimize_line_order_ml(
     station_shapes: list[str],
     routes: list[list[int]],
     line_idx: int,
-    params: RoreaMLParams,
+    params: ParametricPolicyParams,
     demand: LiveDemandSnapshot | None,
     *,
     max_passes: int = 4,
@@ -102,7 +102,7 @@ def optimize_network_ml(
     positions: list[tuple[float, float]],
     station_shapes: list[str],
     routes: list[list[int]],
-    params: RoreaMLParams,
+    params: ParametricPolicyParams,
     demand: LiveDemandSnapshot | None,
     *,
     max_outer: int = 3,
@@ -235,7 +235,7 @@ def choose_unserved_or_rebuild_ml(
     shapes: list[str],
     routes: list[list[int]],
     unserved: list[int],
-    params: RoreaMLParams,
+    params: ParametricPolicyParams,
     demand: LiveDemandSnapshot | None,
 ) -> int | None:
     """Compare zero-downtime extension vs risk-weighted interior rebuild."""
@@ -331,7 +331,7 @@ def _eval_rebuild_candidate_cost(
     routes: list[list[int]],
     target_route: list[int],
     line: int,
-    params: RoreaMLParams,
+    params: ParametricPolicyParams,
     demand: LiveDemandSnapshot | None,
     *,
     current_cost: float,
@@ -359,7 +359,7 @@ def maybe_start_global_rebuild_ml(
     positions: list[tuple[float, float]],
     shapes: list[str],
     routes: list[list[int]],
-    params: RoreaMLParams,
+    params: ParametricPolicyParams,
     demand: LiveDemandSnapshot | None,
 ) -> int | None:
     """Evaluate full-network replan when served & crewed, gated by demolition risk."""

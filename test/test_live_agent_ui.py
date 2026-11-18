@@ -93,7 +93,7 @@ class TestLiveAgentTitleAndHudChrome(unittest.TestCase):
         custom = _fresh_surface()
         draw_title_screen(default_a)
         draw_title_screen(default_b, player_label="Human")
-        draw_title_screen(custom, player_label="Rorea ML")
+        draw_title_screen(custom, player_label="Parametric CEM")
         self.assertEqual(_bytes(default_a), _bytes(default_b))
         layout = title_layout(screen_width, screen_height, include_player=True)
         self.assertNotEqual(
@@ -116,8 +116,8 @@ class TestLiveAgentTitleAndHudChrome(unittest.TestCase):
         ai_a = _fresh_surface()
         ai_b = _fresh_surface()
         hud = {
-            "player_id": "rorea_ml",
-            "label": "Rorea ML",
+            "player_id": "parametric_cem",
+            "label": "Parametric CEM",
             "deliveries": 14,
             "decisions": 25,
             "infer_ms": 0.42,
@@ -142,7 +142,14 @@ class TestLiveAgentRunnerAndAdapter(unittest.TestCase):
     def test_player_ids_labels_and_optional_phase2_registration(self):
         self.assertEqual(
             LIVE_PLAYER_IDS,
-            ("human", "heuristic", "rorea", "rorea_obj", "rorea_global", "rorea_ml"),
+            (
+                "human",
+                "heuristic",
+                "multiline_balancing",
+                "load_objective",
+                "global_replan",
+                "parametric_cem",
+            ),
         )
         for pid in LIVE_PLAYER_IDS:
             self.assertIn(pid, LIVE_PLAYER_LABELS)
@@ -160,9 +167,11 @@ class TestLiveAgentRunnerAndAdapter(unittest.TestCase):
                 ),
             ):
                 ids = available_player_ids()
-                self.assertEqual(ids, (*LIVE_PLAYER_IDS, "rorea_phase2"))
-                self.assertEqual(next_player_id("rorea_ml"), "rorea_phase2")
-                self.assertEqual(next_player_id("rorea_phase2"), "human")
+                self.assertEqual(ids, (*LIVE_PLAYER_IDS, "contextual_residual"))
+                self.assertEqual(
+                    next_player_id("parametric_cem"), "contextual_residual"
+                )
+                self.assertEqual(next_player_id("contextual_residual"), "human")
 
     def test_adapter_masks_and_remove_min_age_match_semantic_env(self):
         mediator = Mediator(seed=77)
@@ -182,13 +191,13 @@ class TestLiveAgentRunnerAndAdapter(unittest.TestCase):
         adapter.advance_decision()
         self.assertTrue(adapter.action_masks()[remove_idx])
 
-    def test_live_driving_rorea_ml_and_rorea_global_over_180_ticks(self):
+    def test_live_driving_parametric_cem_and_global_replan_over_180_ticks(self):
         for player_id in (
-            "rorea_ml",
-            "rorea_global",
+            "parametric_cem",
+            "global_replan",
             "heuristic",
-            "rorea",
-            "rorea_obj",
+            "multiline_balancing",
+            "load_objective",
         ):
             with self.subTest(player_id=player_id):
                 mediator = Mediator(seed=42)
@@ -219,7 +228,7 @@ class TestLiveAgentRunnerAndAdapter(unittest.TestCase):
     def test_auto_resolve_offers_clears_week_boundary(self):
         mediator = Mediator(seed=42)
         mediator.week_calendar = True
-        runner = LiveAgentRunner("rorea_ml", mediator)
+        runner = LiveAgentRunner("parametric_cem", mediator)
         for _ in range(WEEK_LENGTH_STEPS):
             mediator.increment_time(16)
             runner.step(1)
@@ -274,12 +283,12 @@ class TestAppControllerLiveAgentIntegration(unittest.TestCase):
         self.assertEqual(seen[:-1], list(available_player_ids()))
         self.assertEqual(seen[-1], "human")
 
-        while controller.current_player_id != "rorea_ml":
+        while controller.current_player_id != "parametric_cem":
             self._click_title(controller, "player")
         self._click_title(controller, "new_game")
         self.assertIs(controller.state, AppScreen.PLAYING)
         self.assertIsNotNone(controller.live_agent)
-        self.assertEqual(controller.live_agent.player_id, "rorea_ml")
+        self.assertEqual(controller.live_agent.player_id, "parametric_cem")
 
         # Pause menu -> Restart creates a fresh runner on the new mediator.
         first_runner = controller.live_agent
@@ -297,7 +306,7 @@ class TestAppControllerLiveAgentIntegration(unittest.TestCase):
 
     def test_ai_mode_blocks_board_drags_but_allows_speed_pause_and_auto_offers(self):
         controller = AppController(self._build_real_game, start_state=AppScreen.TITLE)
-        while controller.current_player_id != "rorea_global":
+        while controller.current_player_id != "global_replan":
             self._click_title(controller, "player")
         self._click_title(controller, "new_game")
 

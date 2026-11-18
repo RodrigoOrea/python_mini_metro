@@ -1,4 +1,4 @@
-"""Paired Common-Random-Numbers (CRN) CEM trainer for Phase 1 `RoreaMLParams`."""
+"""Paired Common-Random-Numbers (CRN) CEM trainer for Phase 1 `ParametricPolicyParams`."""
 
 from __future__ import annotations
 
@@ -17,17 +17,17 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../src")
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
-from rl.heuristic_rorea_global import play as play_rorea_global  # noqa: E402
-from rl.policy_rorea_ml import (  # noqa: E402
+from rl.heuristic_global_replan import play as play_global_replan  # noqa: E402
+from rl.policy_parametric_cem import (  # noqa: E402
     ANCHOR_PARAMS,
     FLEET_ABLATION_PARAMS,
     PARAM_BOUNDS,
     PARAM_NAMES,
     RISK_FLEET_ABLATION_PARAMS,
-    RoreaMLParams,
+    ParametricPolicyParams,
 )
-from rl.policy_rorea_ml import (
-    play as play_rorea_ml,
+from rl.policy_parametric_cem import (
+    play as play_parametric_cem,
 )
 
 DEFAULT_EVAL_EPISODES = 20
@@ -53,11 +53,11 @@ INIT_STDS: dict[str, float] = {
     "hub_share_bonus": 2.00,
 }
 
-INIT_PRESETS: dict[str, RoreaMLParams] = {
+INIT_PRESETS: dict[str, ParametricPolicyParams] = {
     "anchor": ANCHOR_PARAMS,
     "fleet": FLEET_ABLATION_PARAMS,
     "fleet_risk": RISK_FLEET_ABLATION_PARAMS,
-    "prior": RoreaMLParams(
+    "prior": ParametricPolicyParams(
         w_shape_rarity=0.8,
         w_station_pax=1.5,
         w_station_wait=4.0,
@@ -97,24 +97,24 @@ def paired_stats(
 
 
 def verify_anchor_equivalence(seeds: list[int], max_decisions: int = 200_000) -> None:
-    """Abort before Generation 0 if `ANCHOR_PARAMS` diverges from `rorea_global`."""
+    """Abort before Generation 0 if `ANCHOR_PARAMS` diverges from `global_replan`."""
     for seed in seeds:
-        ref = play_rorea_global(seed, max_decisions=max_decisions)
-        anc = play_rorea_ml(seed, ANCHOR_PARAMS, max_decisions=max_decisions)
+        ref = play_global_replan(seed, max_decisions=max_decisions)
+        anc = play_parametric_cem(seed, ANCHOR_PARAMS, max_decisions=max_decisions)
         if (
             anc["deliveries"] != ref["deliveries"]
             or anc["decisions"] != ref["decisions"]
         ):
             raise AssertionError(
-                f"Anchor drift detected on seed={seed}: ANCHOR={anc} vs rorea_global={ref}"
+                f"Anchor drift detected on seed={seed}: ANCHOR={anc} vs global_replan={ref}"
             )
 
 
 def _play_ml_job(job: tuple[int, int, np.ndarray, int]) -> dict:
     cand_idx, seed, arr, max_decisions = job
     t0 = time.perf_counter()
-    res = play_rorea_ml(
-        seed, RoreaMLParams.from_array(arr), max_decisions=max_decisions
+    res = play_parametric_cem(
+        seed, ParametricPolicyParams.from_array(arr), max_decisions=max_decisions
     )
     res["cand_idx"] = cand_idx
     res["elapsed"] = time.perf_counter() - t0
@@ -124,7 +124,7 @@ def _play_ml_job(job: tuple[int, int, np.ndarray, int]) -> dict:
 def _play_base_job(job: tuple[int, int]) -> dict:
     seed, max_decisions = job
     t0 = time.perf_counter()
-    res = play_rorea_global(seed, max_decisions=max_decisions)
+    res = play_global_replan(seed, max_decisions=max_decisions)
     res["elapsed"] = time.perf_counter() - t0
     return res
 
@@ -162,7 +162,7 @@ def cem_step(
     return new_mu, new_sigma
 
 
-def _save_run_payload(path: Path, params: RoreaMLParams, extra: dict) -> None:
+def _save_run_payload(path: Path, params: ParametricPolicyParams, extra: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"params": params.to_dict(), **extra}
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -185,7 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workers", type=int, default=min(8, os.cpu_count() or 4))
     parser.add_argument("--seed", type=int, default=2026)
     parser.add_argument("--skip-val", action="store_true")
-    parser.add_argument("--out-dir", type=Path, default=Path("output/rorea_cem"))
+    parser.add_argument("--out-dir", type=Path, default=Path("output/parametric_cem"))
     args = parser.parse_args(argv)
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -202,7 +202,7 @@ def main(argv: list[str] | None = None) -> int:
     print("Anchor verification passed (0.00 drift).", flush=True)
 
     print(
-        f"Evaluating rorea_global baseline on {len(train_seeds)} train seeds "
+        f"Evaluating global_replan baseline on {len(train_seeds)} train seeds "
         f"using {args.workers} workers...",
         flush=True,
     )
@@ -221,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     init_params = (
-        RoreaMLParams.load(args.init_file)
+        ParametricPolicyParams.load(args.init_file)
         if args.init_file is not None
         else INIT_PRESETS[args.init]
     )
@@ -267,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
 
         gen_best_idx = int(np.argmax(cand_objectives))
         gen_best_stats = cand_stats[gen_best_idx]
-        gen_best_params = RoreaMLParams.from_array(candidates[gen_best_idx])
+        gen_best_params = ParametricPolicyParams.from_array(candidates[gen_best_idx])
         if cand_objectives[gen_best_idx] > best_train_score:
             best_train_score = cand_objectives[gen_best_idx]
             best_train_params = gen_best_params
@@ -296,7 +296,7 @@ def main(argv: list[str] | None = None) -> int:
             "best_stats": gen_best_stats,
             "elite_mean_gap": round(elite_mean_gap, 2),
             "center_stats": cand_stats[0],
-            "mu": RoreaMLParams.from_array(mu).to_dict(),
+            "mu": ParametricPolicyParams.from_array(mu).to_dict(),
         }
         history.append(rec)
         print(
@@ -318,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
 
-    final_mu_params = RoreaMLParams.from_array(mu)
+    final_mu_params = ParametricPolicyParams.from_array(mu)
     _save_run_payload(
         args.out_dir / "final_mu.json",
         final_mu_params,
@@ -341,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     val_base_map = {r["seed"]: float(r["deliveries"]) for r in val_base}
     val_base_scores = [val_base_map[s] for s in val_seeds]
 
-    shortlist: list[tuple[str, RoreaMLParams]] = [
+    shortlist: list[tuple[str, ParametricPolicyParams]] = [
         ("init", init_params),
         ("best_train", best_train_params),
         ("final_mu", final_mu_params),

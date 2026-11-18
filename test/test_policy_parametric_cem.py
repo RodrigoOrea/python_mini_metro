@@ -1,4 +1,4 @@
-"""Contract tests for the parameterized Phase 1 global policy (`rl.policy_rorea_ml`)."""
+"""Contract tests for the parameterized Phase 1 global policy (`rl.policy_parametric_cem`)."""
 
 from __future__ import annotations
 
@@ -13,12 +13,12 @@ sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../src")
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 from entity.passenger import Passenger  # noqa: E402
-from rl.heuristic_rorea_global import choose as choose_rorea_global  # noqa: E402
-from rl.policy_rorea_ml import (  # noqa: E402
+from rl.heuristic_global_replan import choose as choose_global_replan  # noqa: E402
+from rl.policy_parametric_cem import (  # noqa: E402
     ANCHOR_PARAMS,
     FLEET_ABLATION_PARAMS,
     PARAM_NAMES,
-    RoreaMLParams,
+    ParametricPolicyParams,
     choose,
     compute_ml_objective,
 )
@@ -36,14 +36,14 @@ def _unlock_two_paths(mediator) -> None:
         mediator.update_unlocked_num_paths()
 
 
-class TestPolicyRoreaMLContract(unittest.TestCase):
+class TestPolicyParametricCEMContract(unittest.TestCase):
     def test_params_array_dict_roundtrip_and_clamping(self):
         arr = ANCHOR_PARAMS.to_array()
         self.assertEqual(len(arr), len(PARAM_NAMES))
-        restored = RoreaMLParams.from_array(arr)
+        restored = ParametricPolicyParams.from_array(arr)
         self.assertEqual(restored, ANCHOR_PARAMS)
 
-        extreme = RoreaMLParams(
+        extreme = ParametricPolicyParams(
             alpha_dist=99.0,
             beta_transfer=-5.0,
             w_station_wait=-1.0,
@@ -57,11 +57,11 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "weights.json"
             extreme.save(path)
-            loaded = RoreaMLParams.load(path)
+            loaded = ParametricPolicyParams.load(path)
             self.assertEqual(loaded, extreme)
 
-    def test_anchor_params_match_rorea_global_step_by_step(self):
-        """Zero-drift check: at ANCHOR_THETA every decision matches rorea_global."""
+    def test_anchor_params_match_global_replan_step_by_step(self):
+        """Zero-drift check: at ANCHOR_THETA every decision matches global_replan."""
         for seed in (42, 9000):
             env_ref = SemanticMetroEnv(max_decisions=2500)
             env_ml = SemanticMetroEnv(max_decisions=2500)
@@ -71,13 +71,13 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
                 deliv_ref = 0.0
                 deliv_ml = 0.0
                 for step_idx in range(2500):
-                    a_ref = choose_rorea_global(env_ref)
+                    a_ref = choose_global_replan(env_ref)
                     a_ml = choose(env_ml, ANCHOR_PARAMS)
                     self.assertEqual(
                         a_ml,
                         a_ref,
                         f"seed={seed} step={step_idx}: ANCHOR action {a_ml} "
-                        f"({ACTION_TABLE[a_ml]}) != rorea_global {a_ref} ({ACTION_TABLE[a_ref]})",
+                        f"({ACTION_TABLE[a_ml]}) != global_replan {a_ref} ({ACTION_TABLE[a_ref]})",
                     )
                     _, r_ref, term_ref, trunc_ref, _ = env_ref.step(a_ref)
                     _, r_ml, term_ml, trunc_ml, _ = env_ml.step(a_ml)
@@ -93,7 +93,7 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
                 env_ml.close()
 
     def test_returned_actions_always_legal_under_active_params(self):
-        active = RoreaMLParams(
+        active = ParametricPolicyParams(
             w_shape_rarity=0.8,
             w_station_pax=1.5,
             w_station_wait=4.0,
@@ -148,7 +148,7 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
             m.num_metros = len(m.metros)
             m.line_credits = 0
 
-            base_action = choose_rorea_global(env)
+            base_action = choose_global_replan(env)
             ml_action = choose(env, FLEET_ABLATION_PARAMS)
 
             self.assertEqual(
@@ -193,8 +193,8 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
             m.line_credits = 0
             a_anchor = choose(env, ANCHOR_PARAMS)
             self.assertEqual(ACTION_TABLE[a_anchor][0], ActionKind.REMOVE_LINE)
-            env._rorea_ml_state = None
-            risk_params = RoreaMLParams(demo_risk_weight=150.0)
+            env._parametric_cem_state = None
+            risk_params = ParametricPolicyParams(demo_risk_weight=150.0)
             a_risk = choose(env, risk_params)
             self.assertNotEqual(ACTION_TABLE[a_risk][0], ActionKind.REMOVE_LINE)
         finally:
@@ -224,7 +224,7 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
                 px.wait_ms = 28_000
                 m.stations[2].passengers.append(px)
 
-            rebal_params = RoreaMLParams(
+            rebal_params = ParametricPolicyParams(
                 w_fleet_wait=6.0, w_fleet_load=3.0, w_rebalance=4.0
             )
             _ = choose(env, rebal_params)
@@ -259,7 +259,7 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
             env.reset(seed=99)
             a2 = choose(env, ANCHOR_PARAMS)
             self.assertTrue(bool(env.action_masks()[a2]))
-            state = getattr(env, "_rorea_ml_state")
+            state = getattr(env, "_parametric_cem_state")
             self.assertEqual(state.last_decision, 0)
             self.assertIsNone(state.active_plan)
         finally:
@@ -292,7 +292,7 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
             cand = m._fleet.unassignment_candidate(m, m.paths[0])
             self.assertIsNotNone(cand)
             self.assertGreater(len(cand.carriages), 0)
-            rebal_params = RoreaMLParams(
+            rebal_params = ParametricPolicyParams(
                 w_fleet_wait=6.0, w_fleet_load=3.0, w_rebalance=4.0
             )
             _ = choose(env, rebal_params)
@@ -310,9 +310,9 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
                 px = Passenger(dest)
                 px.wait_ms = 26_000
                 m.stations[2].passengers.append(px)
-            env._rorea_ml_state = None
+            env._parametric_cem_state = None
             _ = choose(env, rebal_params)
-            state = env._rorea_ml_state
+            state = env._parametric_cem_state
             self.assertEqual(state.pending_rebalance_target_id, m.paths[1].id)
 
             # Even if Line 0 looks busy when locomotive lands, it routes to pinned target.
@@ -354,8 +354,8 @@ class TestPolicyRoreaMLContract(unittest.TestCase):
 
             a_anchor = choose(env, ANCHOR_PARAMS)
             self.assertEqual(ACTION_TABLE[a_anchor][0], ActionKind.REMOVE_LINE)
-            env._rorea_ml_state = None
-            a_risk = choose(env, RoreaMLParams(demo_risk_weight=80.0))
+            env._parametric_cem_state = None
+            a_risk = choose(env, ParametricPolicyParams(demo_risk_weight=80.0))
             self.assertNotEqual(ACTION_TABLE[a_risk][0], ActionKind.REMOVE_LINE)
         finally:
             env.close()

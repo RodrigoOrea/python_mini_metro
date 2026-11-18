@@ -5,8 +5,8 @@ from __future__ import annotations
 import numpy as np
 
 from rl.heuristic import _served
-from rl.heuristic_rorea_global import next_action_for_plan
-from rl.heuristic_rorea_obj import _extract_graph_state
+from rl.heuristic_global_replan import next_action_for_plan
+from rl.heuristic_load_objective import _extract_graph_state
 from rl.objective_ml import (
     ANCHOR_PARAMS,
     BEST_PHASE1_PARAMS,
@@ -15,7 +15,7 @@ from rl.objective_ml import (
     PARAM_NAMES,
     RISK_FLEET_ABLATION_PARAMS,
     LiveDemandSnapshot,
-    RoreaMLParams,
+    ParametricPolicyParams,
     compute_ml_objective,
     extract_live_demand,
 )
@@ -39,7 +39,7 @@ __all__ = [
     "PARAM_NAMES",
     "RISK_FLEET_ABLATION_PARAMS",
     "LiveDemandSnapshot",
-    "RoreaMLParams",
+    "ParametricPolicyParams",
     "choose",
     "compute_ml_objective",
     "extract_live_demand",
@@ -49,21 +49,21 @@ __all__ = [
 
 def _get_ml_state(env) -> MLPlannerState:
     mediator = env._mediator
-    state: MLPlannerState | None = getattr(env, "_rorea_ml_state", None)
+    state: MLPlannerState | None = getattr(env, "_parametric_cem_state", None)
     if (
         state is None
         or state.mediator_id != id(mediator)
         or env._decision < state.last_decision
     ):
         state = MLPlannerState(mediator_id=id(mediator), last_decision=env._decision)
-        env._rorea_ml_state = state
+        env._parametric_cem_state = state
     else:
         state.last_decision = env._decision
     return state
 
 
 def _line_fleet_raw(
-    mediator, line_idx: int, params: RoreaMLParams, demand: LiveDemandSnapshot
+    mediator, line_idx: int, params: ParametricPolicyParams, demand: LiveDemandSnapshot
 ) -> float:
     path = mediator.paths[line_idx]
     return params.w_fleet_wait * demand.line_max_wait_sq[
@@ -83,7 +83,7 @@ def _line_eff_units(mediator, line_idx: int) -> float:
 
 
 def _line_fleet_pressure(
-    mediator, line_idx: int, params: RoreaMLParams, demand: LiveDemandSnapshot
+    mediator, line_idx: int, params: ParametricPolicyParams, demand: LiveDemandSnapshot
 ) -> float:
     return _line_fleet_raw(mediator, line_idx, params, demand) / _line_eff_units(
         mediator, line_idx
@@ -94,7 +94,7 @@ def _maybe_rebalance_locomotives(
     env,
     state: MLPlannerState,
     mediator,
-    params: RoreaMLParams,
+    params: ParametricPolicyParams,
     demand: LiveDemandSnapshot,
 ) -> None:
     """Safely shift 1 surplus carriage-free locomotive via minimax pressure reduction."""
@@ -169,7 +169,7 @@ def _maybe_rebalance_locomotives(
             state.pending_rebalance_until = env._decision + REBALANCE_PENDING_WINDOW
 
 
-def choose(env, params: RoreaMLParams | None = None) -> int:
+def choose(env, params: ParametricPolicyParams | None = None) -> int:
     """Pick the action optimizing live `H_theta(s, G)` and smart fleet control, or WAIT."""
     cfg = BEST_PHASE1_PARAMS if params is None else params
     mediator = env._mediator
@@ -368,7 +368,7 @@ def choose(env, params: RoreaMLParams | None = None) -> int:
 
 def play(
     seed: int,
-    params: RoreaMLParams | None = None,
+    params: ParametricPolicyParams | None = None,
     max_decisions: int = 200_000,
 ) -> dict:
     """Run one full episode, returning deliveries, decisions survived, and actions."""

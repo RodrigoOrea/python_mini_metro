@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 
 from rl.heuristic import _distance
-from rl.heuristic_rorea_global import compute_global_objective
+from rl.heuristic_global_replan import compute_global_objective
 
 D_REF = 250.0
 UNREACH_PENALTY = 30.0
@@ -53,8 +53,8 @@ PARAM_BOUNDS: dict[str, tuple[float, float]] = {
 
 
 @dataclass(frozen=True)
-class RoreaMLParams:
-    """Learnable parameter vector anchored cleanly at `heuristic_rorea_global`."""
+class ParametricPolicyParams:
+    """Learnable parameter vector anchored cleanly at `heuristic_global_replan`."""
 
     alpha_dist: float = 1.5
     beta_transfer: float = 1.5
@@ -78,7 +78,7 @@ class RoreaMLParams:
     @classmethod
     def from_array(
         cls, values: np.ndarray | list[float] | tuple[float, ...]
-    ) -> RoreaMLParams:
+    ) -> ParametricPolicyParams:
         if len(values) != len(PARAM_NAMES):
             raise ValueError(
                 f"Expected {len(PARAM_NAMES)} parameters, got {len(values)}"
@@ -89,14 +89,14 @@ class RoreaMLParams:
         }
         return cls(**kwargs)
 
-    def clamped(self) -> RoreaMLParams:
+    def clamped(self) -> ParametricPolicyParams:
         return self.from_array(self.to_array())
 
     def to_dict(self) -> dict[str, float]:
         return {name: float(value) for name, value in asdict(self).items()}
 
     @classmethod
-    def from_dict(cls, raw: dict[str, float]) -> RoreaMLParams:
+    def from_dict(cls, raw: dict[str, float]) -> ParametricPolicyParams:
         defaults = asdict(cls())
         merged = {name: float(raw.get(name, defaults[name])) for name in PARAM_NAMES}
         return cls(**merged).clamped()
@@ -107,7 +107,7 @@ class RoreaMLParams:
         out.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: str | Path) -> RoreaMLParams:
+    def load(cls, path: str | Path) -> ParametricPolicyParams:
         raw = json.loads(Path(path).read_text(encoding="utf-8"))
         if "params" in raw and isinstance(raw["params"], dict):
             raw = raw["params"]
@@ -129,14 +129,14 @@ class RoreaMLParams:
         )
 
 
-ANCHOR_PARAMS = RoreaMLParams()
-FLEET_ABLATION_PARAMS = RoreaMLParams(
+ANCHOR_PARAMS = ParametricPolicyParams()
+FLEET_ABLATION_PARAMS = ParametricPolicyParams(
     w_fleet_wait=4.0, w_fleet_load=2.0, w_rebalance=2.5
 )
-RISK_FLEET_ABLATION_PARAMS = RoreaMLParams(
+RISK_FLEET_ABLATION_PARAMS = ParametricPolicyParams(
     demo_risk_weight=80.0, w_fleet_wait=4.0, w_fleet_load=2.0, w_rebalance=2.5
 )
-BEST_PHASE1_PARAMS = RoreaMLParams(
+BEST_PHASE1_PARAMS = ParametricPolicyParams(
     alpha_dist=1.4188691680249734,
     beta_transfer=1.6191614061389707,
     gamma_load=11.598474102358638,
@@ -261,7 +261,7 @@ def compute_ml_objective(
     positions: list[tuple[float, float]],
     station_shapes: list[str],
     routes: list[list[int]],
-    params: RoreaMLParams = ANCHOR_PARAMS,
+    params: ParametricPolicyParams = ANCHOR_PARAMS,
     demand: LiveDemandSnapshot | None = None,
 ) -> float:
     """Compute demand-, wait-, and overload-aware H_theta(s, G).
@@ -372,7 +372,7 @@ def compute_ml_objective(
 
 def demolition_risk_cost(
     line_idx: int,
-    params: RoreaMLParams,
+    params: ParametricPolicyParams,
     demand: LiveDemandSnapshot | None,
     *,
     current_cost: float = 0.0,

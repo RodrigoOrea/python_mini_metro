@@ -17,10 +17,10 @@ sys.path.insert(0, _ROOT)
 import rl.bridge_protocol as bp  # noqa: E402
 from rl.bridge_client import BridgeRpcClient, BridgeRpcError  # noqa: E402
 from rl.real_game_adapter import (  # noqa: E402
-    SHAPE_TO_ROREA,
+    SHAPE_TO_SEMANTIC,
     RealGameAgent,
     choose_weekly_upgrade,
-    map_shape_to_rorea,
+    map_shape_to_semantic,
     snapshot_to_open_view,
 )
 from scripts.mock_metro_rpc import MockMetroBoard, MockMetroRpcServer  # noqa: E402
@@ -203,9 +203,9 @@ def _sample_snapshot_dict(**overrides: Any) -> dict[str, Any]:
 
 
 class RealGameAdapterUnitTests(unittest.TestCase):
-    def test_shape_to_rorea_maps_square_to_rect_and_preserves_others(self) -> None:
-        self.assertEqual(SHAPE_TO_ROREA["SQUARE"], "RECT")
-        self.assertEqual(map_shape_to_rorea("SQUARE"), "RECT")
+    def test_shape_to_semantic_maps_square_to_rect_and_preserves_others(self) -> None:
+        self.assertEqual(SHAPE_TO_SEMANTIC["SQUARE"], "RECT")
+        self.assertEqual(map_shape_to_semantic("SQUARE"), "RECT")
         for shape in (
             "CIRCLE",
             "TRIANGLE",
@@ -217,8 +217,8 @@ class RealGameAdapterUnitTests(unittest.TestCase):
             "STAR",
             "WEDGE",
         ):
-            self.assertEqual(SHAPE_TO_ROREA[shape], shape)
-            self.assertEqual(map_shape_to_rorea(shape), shape)
+            self.assertEqual(SHAPE_TO_SEMANTIC[shape], shape)
+            self.assertEqual(map_shape_to_semantic(shape), shape)
 
     def test_snapshot_to_open_view_scales_coords_filters_ghosts_and_wires_trains(
         self,

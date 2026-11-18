@@ -1,6 +1,6 @@
 """Combinatorial optimization heuristic guided by a network objective H(G) by Rodrigo Orea.
 
-Evolution from manual rules (`heuristic_rorea.py`) to objective-guided search:
+Evolution from manual rules (`heuristic_multiline.py`) to objective-guided search:
 Instead of relying solely on greedy nearest-endpoint distance, every candidate
 network modification `a` (creating a line with CONNECT, or growing a line via
 EXTEND_LINE / PREPEND_LINE, or allocating a locomotive) is evaluated by
@@ -27,7 +27,7 @@ import heapq
 import numpy as np
 
 from rl.heuristic import _distance, _served, _station_positions
-from rl.heuristic_rorea import _eligible_lines_for_extension
+from rl.heuristic_multiline import _eligible_lines_for_extension
 from rl.semantic_env import ACTION_TABLE, ActionKind
 
 

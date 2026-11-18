@@ -23,9 +23,9 @@ from rl.contextual_ml import (  # noqa: E402
     CONTEXT_DIM,
     DEFAULT_DELTA_SCALES,
     PARAM_DIM,
-    ContextualRoreaMLP,
+    ContextualResidualMLP,
 )
-from rl.objective_ml import RoreaMLParams  # noqa: E402
+from rl.objective_ml import ParametricPolicyParams  # noqa: E402
 
 _NPZ_KEYS = (
     "X_train Y_train W_train RTG_train X_val Y_val W_val RTG_val x_mean x_std delta_scale"
@@ -33,7 +33,7 @@ _NPZ_KEYS = (
 
 
 class TorchContextualActorCritic(nn.Module):
-    """Exact PyTorch mirror of `ContextualRoreaMLP` plus a ReLU `ValueHead`."""
+    """Exact PyTorch mirror of `ContextualResidualMLP` plus a ReLU `ValueHead`."""
 
     def __init__(
         self,
@@ -83,7 +83,7 @@ class TorchContextualActorCritic(nn.Module):
                 nn.init.zeros_(layer.weight)
 
     def normalize_features(self, x: torch.Tensor) -> torch.Tensor:
-        """Standardize and outlier-clip features matching `ContextualRoreaMLP`."""
+        """Standardize and outlier-clip features matching `ContextualResidualMLP`."""
         x64 = x.to(dtype=torch.float64, device=self.x_mean.device)
         safe = torch.where(self.x_std > 1e-6, self.x_std, 1.0)
         return torch.clamp((x64 - self.x_mean) / safe, -10.0, 10.0)
@@ -111,9 +111,9 @@ class TorchContextualActorCritic(nn.Module):
         return self.forward_raw(x), self.forward_value_norm(x)
 
     def to_contextual_mlp(
-        self, base_params: RoreaMLParams = BEST_PHASE1_PARAMS
-    ) -> ContextualRoreaMLP:
-        """Export exact `float64` weights and normalization stats to `ContextualRoreaMLP`."""
+        self, base_params: ParametricPolicyParams = BEST_PHASE1_PARAMS
+    ) -> ContextualResidualMLP:
+        """Export exact `float64` weights and normalization stats to `ContextualResidualMLP`."""
         arrs = {
             "x_mean": self.x_mean,
             "x_std": self.x_std,
@@ -123,7 +123,7 @@ class TorchContextualActorCritic(nn.Module):
             "W2": self.actor_fc2.weight.T,
             "b2": self.actor_fc2.bias,
         }
-        return ContextualRoreaMLP(
+        return ContextualResidualMLP(
             base_params=base_params,
             hidden_dim=self.hidden_dim,
             **{k: v.detach().cpu().numpy().copy() for k, v in arrs.items()},
@@ -133,7 +133,7 @@ class TorchContextualActorCritic(nn.Module):
         self,
         path: str | Path,
         *,
-        base_params: RoreaMLParams = BEST_PHASE1_PARAMS,
+        base_params: ParametricPolicyParams = BEST_PHASE1_PARAMS,
         extra: dict[str, Any] | None = None,
     ) -> None:
         """Persist actor+critic weights and metadata in a `weights_only`-safe checkpoint."""
@@ -155,12 +155,12 @@ class TorchContextualActorCritic(nn.Module):
     @classmethod
     def load_checkpoint(
         cls, path: str | Path, device: str | torch.device = "cpu"
-    ) -> tuple[TorchContextualActorCritic, RoreaMLParams, dict[str, Any]]:
+    ) -> tuple[TorchContextualActorCritic, ParametricPolicyParams, dict[str, Any]]:
         """Load actor+critic checkpoint onto `device`."""
         payload = torch.load(Path(path), map_location=device, weights_only=True)
         model = cls(hidden_dim=int(payload["hidden_dim"])).to(device)
         model.load_state_dict(payload["state_dict"])
-        base = RoreaMLParams.from_dict(payload["base_params"])
+        base = ParametricPolicyParams.from_dict(payload["base_params"])
         return model, base, dict(payload.get("extra", {}))
 
 

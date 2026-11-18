@@ -46,19 +46,19 @@ from search_policy import (  # noqa: E402
 
 from config import screen_height, screen_width  # noqa: E402
 from rl.heuristic import choose  # noqa: E402
-from rl.heuristic_rorea import choose as choose_rorea  # noqa: E402
-from rl.heuristic_rorea_global import choose as choose_rorea_global  # noqa: E402
-from rl.heuristic_rorea_obj import choose as choose_rorea_obj  # noqa: E402
-from rl.policy_rorea_ml import choose as choose_rorea_ml  # noqa: E402
+from rl.heuristic_global_replan import choose as choose_global_replan  # noqa: E402
+from rl.heuristic_load_objective import choose as choose_load_objective  # noqa: E402
+from rl.heuristic_multiline import choose as choose_multiline  # noqa: E402
+from rl.policy_parametric_cem import choose as choose_parametric_cem  # noqa: E402
 from rl.semantic_env import ACTION_TABLE, SemanticMetroEnv  # noqa: E402
 from save_game import serialize_game  # noqa: E402
 
 PLAYERS = (
     "heuristic",
-    "rorea",
-    "rorea_obj",
-    "rorea_global",
-    "rorea_ml",
+    "multiline_balancing",
+    "load_objective",
+    "global_replan",
+    "parametric_cem",
     "search",
     "model",
 )
@@ -241,14 +241,14 @@ def play(
 
         if player == "heuristic":
             action = choose(env)
-        elif player == "rorea":
-            action = choose_rorea(env)
-        elif player == "rorea_obj":
-            action = choose_rorea_obj(env)
-        elif player == "rorea_global":
-            action = choose_rorea_global(env)
-        elif player == "rorea_ml":
-            action = choose_rorea_ml(env)
+        elif player == "multiline_balancing":
+            action = choose_multiline(env)
+        elif player == "load_objective":
+            action = choose_load_objective(env)
+        elif player == "global_replan":
+            action = choose_global_replan(env)
+        elif player == "parametric_cem":
+            action = choose_parametric_cem(env)
         elif player == "model":
             predicted, _ = model.predict(
                 observation, action_masks=env.action_masks(), deterministic=True

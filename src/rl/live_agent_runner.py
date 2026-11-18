@@ -22,19 +22,19 @@ from rl.semantic_env import (
 LIVE_PLAYER_LABELS = {
     "human": "Human",
     "heuristic": "Heuristic",
-    "rorea": "Rorea",
-    "rorea_obj": "Rorea Obj",
-    "rorea_global": "Rorea Global",
-    "rorea_ml": "Rorea ML",
-    "rorea_phase2": "Rorea Phase 2",
+    "multiline_balancing": "Multiline Balancing",
+    "load_objective": "Load Objective",
+    "global_replan": "Global Replan",
+    "parametric_cem": "Parametric CEM",
+    "contextual_residual": "Contextual Residual",
 }
-LIVE_PLAYER_IDS = tuple(k for k in LIVE_PLAYER_LABELS if k != "rorea_phase2")
+LIVE_PLAYER_IDS = tuple(k for k in LIVE_PLAYER_LABELS if k != "contextual_residual")
 _CHOOSER_MODULES = {
     "heuristic": "rl.heuristic",
-    "rorea": "rl.heuristic_rorea",
-    "rorea_obj": "rl.heuristic_rorea_obj",
-    "rorea_global": "rl.heuristic_rorea_global",
-    "rorea_ml": "rl.policy_rorea_ml",
+    "multiline_balancing": "rl.heuristic_multiline",
+    "load_objective": "rl.heuristic_load_objective",
+    "global_replan": "rl.heuristic_global_replan",
+    "parametric_cem": "rl.policy_parametric_cem",
 }
 _PHASE2_PATHS = (
     Path("output/phase2_rl/best_val.json"),
@@ -55,7 +55,7 @@ def available_player_ids() -> tuple[str, ...]:
     """Return available player IDs, adding Phase 2 ML when module and weights exist."""
     has_mod = importlib.util.find_spec("rl.contextual_ml") is not None
     if has_mod and _find_phase2_checkpoint() is not None:
-        return (*LIVE_PLAYER_IDS, "rorea_phase2")
+        return (*LIVE_PLAYER_IDS, "contextual_residual")
     return LIVE_PLAYER_IDS
 
 
@@ -125,9 +125,9 @@ class MediatorEnvAdapter:
 
 
 def _resolve_chooser(player_id: str):
-    if player_id == "rorea_phase2":
+    if player_id == "contextual_residual":
         if (checkpoint := _find_phase2_checkpoint()) is None:
-            raise ValueError("Phase 2 checkpoint not found for 'rorea_phase2'")
+            raise ValueError("Phase 2 checkpoint not found for 'contextual_residual'")
         mod = importlib.import_module("rl.contextual_ml")
         for name in ("load_policy", "load_model"):
             if callable(loader := getattr(mod, name, None)):
@@ -183,7 +183,7 @@ class LiveAgentRunner:
                 self.actions_taken += 1
                 self.last_action_name = format_action_name(action)
             elif action != 0:
-                for attr in ("_rorea_ml_state", "_rorea_global_state"):
+                for attr in ("_parametric_cem_state", "_global_replan_state"):
                     if (st := getattr(self.adapter, attr, None)) is not None:
                         st.active_plan = None
             self.decisions += 1

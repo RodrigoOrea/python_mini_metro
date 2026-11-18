@@ -1,4 +1,4 @@
-"""Phase 2 contextual state-dependent residual ML policy over `RoreaMLParams`."""
+"""Phase 2 contextual state-dependent residual ML policy over `ParametricPolicyParams`."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ from rl.objective_ml import (
     BEST_PHASE1_PARAMS,
     PARAM_NAMES,
     LiveDemandSnapshot,
-    RoreaMLParams,
+    ParametricPolicyParams,
     extract_live_demand,
 )
-from rl.policy_rorea_ml import choose as choose_rorea_ml
+from rl.policy_parametric_cem import choose as choose_parametric_cem
 
 CONTEXT_FEATURE_NAMES: tuple[str, ...] = (
     ("stations_norm", "lines_norm", "mean_stops_norm", "max_stops_norm")
@@ -57,7 +57,7 @@ __all__ = [
     "DEFAULT_DELTA_SCALES",
     "DEFAULT_DELTA_SCALE_MAP",
     "PARAM_DIM",
-    "ContextualRoreaMLP",
+    "ContextualResidualMLP",
     "choose_contextual",
     "extract_context_features",
     "play_contextual",
@@ -126,10 +126,10 @@ def extract_context_features(
 
 
 @dataclass
-class ContextualRoreaMLP:
-    """Two-layer tanh residual MLP mapping context features to `RoreaMLParams`."""
+class ContextualResidualMLP:
+    """Two-layer tanh residual MLP mapping context features to `ParametricPolicyParams`."""
 
-    base_params: RoreaMLParams
+    base_params: ParametricPolicyParams
     hidden_dim: int
     x_mean: np.ndarray
     x_std: np.ndarray
@@ -157,20 +157,20 @@ class ContextualRoreaMLP:
                 shapes[name]
             )
             if not np.all(np.isfinite(arr)):
-                raise ValueError(f"Non-finite values in ContextualRoreaMLP.{name}")
+                raise ValueError(f"Non-finite values in ContextualResidualMLP.{name}")
             setattr(self, name, arr)
 
     @classmethod
     def zero_init(
         cls,
-        base_params: RoreaMLParams = BEST_PHASE1_PARAMS,
+        base_params: ParametricPolicyParams = BEST_PHASE1_PARAMS,
         hidden_dim: int = 32,
         seed: int = 0,
         *,
         x_mean: np.ndarray | None = None,
         x_std: np.ndarray | None = None,
         delta_scale: np.ndarray | None = None,
-    ) -> ContextualRoreaMLP:
+    ) -> ContextualResidualMLP:
         """Initialize with deterministic Xavier W1 and exact zero readout W2, b2."""
         rng = np.random.default_rng(seed)
         lim = math.sqrt(6.0 / (CONTEXT_DIM + hidden_dim))
@@ -211,20 +211,20 @@ class ContextualRoreaMLP:
         """Compute scaled parameter-space residual `delta_scale * tanh(raw_out)`."""
         return self.delta_scale * np.tanh(self.forward_raw(x))
 
-    def predict_params(self, x: np.ndarray) -> RoreaMLParams:
-        """Predict clamped `RoreaMLParams` for one 1D context vector `x`."""
+    def predict_params(self, x: np.ndarray) -> ParametricPolicyParams:
+        """Predict clamped `ParametricPolicyParams` for one 1D context vector `x`."""
         delta = self.predict_delta(x)
         if delta.ndim != 1 or delta.shape[0] != PARAM_DIM:
             raise ValueError(f"predict_params expects 1D vector of len {CONTEXT_DIM}")
         # Preserve bit-for-bit equality with base_params when readout is exact zero.
         if not np.any(delta):
             return self.base_params
-        return RoreaMLParams.from_array(self.base_params.to_array() + delta)
+        return ParametricPolicyParams.from_array(self.base_params.to_array() + delta)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize policy weights, normalization stats, and metadata to JSON dict."""
         data: dict[str, Any] = {
-            "format": "contextual_rorea_mlp_v1",
+            "format": "contextual_parametric_cemp_v1",
             "context_dim": CONTEXT_DIM,
             "context_features": list(CONTEXT_FEATURE_NAMES),
             "param_names": list(PARAM_NAMES),
@@ -236,8 +236,8 @@ class ContextualRoreaMLP:
         return data
 
     @classmethod
-    def from_dict(cls, raw: dict[str, Any]) -> ContextualRoreaMLP:
-        """Deserialize and validate a `ContextualRoreaMLP` from a JSON dict."""
+    def from_dict(cls, raw: dict[str, Any]) -> ContextualResidualMLP:
+        """Deserialize and validate a `ContextualResidualMLP` from a JSON dict."""
         if "context_dim" in raw and int(raw["context_dim"]) != CONTEXT_DIM:
             raise ValueError(f"Expected context_dim={CONTEXT_DIM}")
         if (
@@ -248,7 +248,7 @@ class ContextualRoreaMLP:
         if "param_names" in raw and tuple(raw["param_names"]) != PARAM_NAMES:
             raise ValueError("Mismatched param_names specification")
         return cls(
-            base_params=RoreaMLParams.from_dict(raw["base_params"]),
+            base_params=ParametricPolicyParams.from_dict(raw["base_params"]),
             hidden_dim=int(raw["hidden_dim"]),
             **{name: raw[name] for name in _ARRAY_FIELDS},
         )
@@ -260,7 +260,7 @@ class ContextualRoreaMLP:
         out.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: str | Path) -> ContextualRoreaMLP:
+    def load(cls, path: str | Path) -> ContextualResidualMLP:
         """Load policy JSON from `path`."""
         return cls.from_dict(json.loads(Path(path).read_text(encoding="utf-8")))
 
@@ -268,19 +268,19 @@ class ContextualRoreaMLP:
 @dataclass
 class _ContextCache:
     mediator_ref: weakref.ref[Any]
-    policy_ref: weakref.ref[ContextualRoreaMLP]
+    policy_ref: weakref.ref[ContextualResidualMLP]
     last_decision: int
     last_update_decision: int
     topo_key: tuple[int, int, tuple[tuple[str, int], ...]]
-    params: RoreaMLParams
+    params: ParametricPolicyParams
 
 
 def choose_contextual(
-    env: Any, policy: ContextualRoreaMLP | None = None, *, update_interval: int = 100
+    env: Any, policy: ContextualResidualMLP | None = None, *, update_interval: int = 100
 ) -> int:
     """Select an action using state-conditioned `policy` cached across decisions."""
     if policy is None:
-        return choose_rorea_ml(env, BEST_PHASE1_PARAMS)
+        return choose_parametric_cem(env, BEST_PHASE1_PARAMS)
     mediator = env._mediator
     decision = int(getattr(env, "_decision", 0))
     topo = (
@@ -288,7 +288,7 @@ def choose_contextual(
         len(mediator.paths),
         tuple((p.id, len(p.stations)) for p in mediator.paths),
     )
-    cache: _ContextCache | None = getattr(env, "_rorea_ctx_cache", None)
+    cache: _ContextCache | None = getattr(env, "_contextual_cache", None)
     stale = (
         cache is None
         or cache.mediator_ref() is not mediator
@@ -307,16 +307,16 @@ def choose_contextual(
             topo,
             active_params,
         )
-        env._rorea_ctx_cache = cache
+        env._contextual_cache = cache
     else:
         cache.last_decision = decision
         active_params = cache.params
-    return choose_rorea_ml(env, active_params)
+    return choose_parametric_cem(env, active_params)
 
 
 def play_contextual(
     seed: int,
-    policy: ContextualRoreaMLP | None = None,
+    policy: ContextualResidualMLP | None = None,
     max_decisions: int = 200_000,
     *,
     update_interval: int = 100,

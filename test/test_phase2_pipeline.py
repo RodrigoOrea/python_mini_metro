@@ -22,7 +22,7 @@ from rl.contextual_ml import (  # noqa: E402
     CONTEXT_DIM,
     DEFAULT_DELTA_SCALES,
     PARAM_DIM,
-    ContextualRoreaMLP,
+    ContextualResidualMLP,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -87,7 +87,7 @@ class TestPhase2PyTorchPipeline(unittest.TestCase):
         rng = np.random.default_rng(123)
         x_mean = rng.uniform(0.0, 2.0, size=CONTEXT_DIM)
         x_std = rng.uniform(0.05, 2.0, size=CONTEXT_DIM)
-        x_std[5] = 0.0  # Verify safe_std matches ContextualRoreaMLP when std=0.
+        x_std[5] = 0.0  # Verify safe_std matches ContextualResidualMLP when std=0.
 
         model0 = TorchContextualActorCritic(hidden_dim=32, x_mean=x_mean, x_std=x_std)
         x_in = rng.uniform(-1.0, 4.0, size=(32, CONTEXT_DIM))
@@ -105,7 +105,7 @@ class TestPhase2PyTorchPipeline(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             jpath = Path(tmp) / "exported.json"
             model0.to_contextual_mlp(BEST_PHASE1_PARAMS).save(jpath)
-            loaded = ContextualRoreaMLP.load(jpath)
+            loaded = ContextualResidualMLP.load(jpath)
         with torch.no_grad():
             xt = torch.as_tensor(x_in, dtype=torch.float32)
             pt_raw = model0.forward_raw(xt).numpy()
@@ -172,7 +172,7 @@ class TestPhase2PyTorchPipeline(unittest.TestCase):
                 il_hist["history"][-1]["val"]["loss"],
                 il_hist["history"][0]["val"]["loss"],
             )
-            il_mlp = ContextualRoreaMLP.load(il_json)
+            il_mlp = ContextualResidualMLP.load(il_json)
             self.assertEqual(il_mlp.hidden_dim, 16)
 
             rl_dir = root / "rl_out"
@@ -209,7 +209,7 @@ class TestPhase2PyTorchPipeline(unittest.TestCase):
             )
             self.assertEqual(len(rl_hist["train_history"]), 1)
             self.assertGreater(rl_hist["train_history"][0]["n_steps"], 0)
-            rl_mlp = ContextualRoreaMLP.load(final_json)
+            rl_mlp = ContextualResidualMLP.load(final_json)
             p = rl_mlp.predict_params(np.ones(CONTEXT_DIM))
             self.assertEqual(p, p.clamped())
 
