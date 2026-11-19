@@ -28,6 +28,7 @@ namespace MiniMetroRoreaBridge
         private Texture2D _texError;
         private Texture2D _dotTex;
 
+        private bool _wasMouseDown;
         private bool _initialized;
         private bool _disposed;
 
@@ -65,11 +66,12 @@ namespace MiniMetroRoreaBridge
             _pulseDotRect.sizeDelta = new Vector2(dotSize, dotSize);
             _pulseDotRect.anchoredPosition = new Vector2(-13f * scale, 0f);
 
+            float minX = Screen.width * 0.5f + (halfW - marginRight - width) * (Screen.width / (halfW * 2f));
+            float maxX = Screen.width * 0.5f + (halfW - marginRight) * (Screen.width / (halfW * 2f));
+            float minY = Screen.height * 0.5f + (halfH - offsetTop - height) * (Screen.height / (halfH * 2f));
+            float maxY = Screen.height * 0.5f + (halfH - offsetTop) * (Screen.height / (halfH * 2f));
+
             Vector3 mouse = Input.mousePosition;
-            float minX = Screen.width - marginRight - width;
-            float maxX = Screen.width - marginRight;
-            float maxY = Screen.height - offsetTop;
-            float minY = Screen.height - offsetTop - height;
             bool hovered = mouse.x >= minX && mouse.x <= maxX && mouse.y >= minY && mouse.y <= maxY;
 
             _buttonImage.texture = SelectTexture(isRunning, hasError, hovered);
@@ -88,7 +90,10 @@ namespace MiniMetroRoreaBridge
                 _pulseDotImage.color = new Color(0.45f, 0.53f, 0.61f, 0.85f);
             }
 
-            return hovered && Input.GetMouseButtonDown(0);
+            bool mouseDown = Input.GetMouseButton(0);
+            bool clicked = hovered && (Input.GetMouseButtonDown(0) || (mouseDown && !_wasMouseDown));
+            _wasMouseDown = mouseDown;
+            return clicked;
         }
 
         public void Dispose()
