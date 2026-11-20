@@ -319,6 +319,41 @@ class MockMetroBoard:
 
     _act_prepend_line = _act_extend_line
 
+    def _act_add_to_line(self, act: bp.AddToLineAction) -> None:
+        ln = self._line(act.line_id)
+        sid = self._station(act.station_id).id
+        pos = act.position
+        if pos < 0 or pos > len(ln.station_ids):
+            _err(bp.ErrorCode.INVALID_ARGS, f"ADD_TO_LINE position out of range: {pos}")
+        if ln.is_looped:
+            if sid in ln.station_ids:
+                _err(bp.ErrorCode.INVALID_ARGS, "Station already on line")
+            new_sids = ln.station_ids[:pos] + [sid] + ln.station_ids[pos:]
+            new_loop = True
+        elif pos in (0, len(ln.station_ids)):
+            is_ext = pos == len(ln.station_ids)
+            close_target = ln.station_ids[0] if is_ext else ln.station_ids[-1]
+            if sid in ln.station_ids:
+                if sid != close_target or len(ln.station_ids) < 3:
+                    _err(bp.ErrorCode.INVALID_ARGS, "Station already on line")
+                new_sids, new_loop = list(ln.station_ids), True
+            else:
+                new_sids = ln.station_ids + [sid] if is_ext else [sid] + ln.station_ids
+                new_loop = act.is_looped and len(new_sids) >= 3
+        else:
+            if act.is_looped:
+                _err(
+                    bp.ErrorCode.INVALID_ARGS,
+                    "Cannot close loop via interior ADD_TO_LINE",
+                )
+            if sid in ln.station_ids:
+                _err(bp.ErrorCode.INVALID_ARGS, "Station already on line")
+            new_sids = ln.station_ids[:pos] + [sid] + ln.station_ids[pos:]
+            new_loop = False
+        cost = self._line_tunnels(new_sids, new_loop)
+        ln.tunnels_used = self._check_tunnels(cost, ln.tunnels_used)
+        ln.station_ids, ln.is_looped = new_sids, new_loop
+
     def _act_insert_station(self, act: bp.InsertStationAction) -> None:
         ln = self._line(act.line_id)
         sid = self._station(act.station_id).id

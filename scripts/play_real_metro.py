@@ -26,7 +26,7 @@ from rl.bridge_protocol import (  # noqa: E402
     Snapshot,
     WaitAction,
 )
-from rl.real_game_adapter import RealGameAgent  # noqa: E402
+from rl.real_game_adapter import PLANNER_NAMES, RealGameAgent  # noqa: E402
 from scripts.mock_metro_rpc import MockMetroBoard, MockMetroRpcServer  # noqa: E402
 
 
@@ -150,7 +150,10 @@ def run_live_session(
 
         if isinstance(action, WaitAction):
             try:
-                if snapshot.is_paused and not active_agent.state.pending_actions:
+                if snapshot.is_paused and (
+                    not active_agent.state.pending_actions
+                    or active_agent.state.pending_rebuild is not None
+                ):
                     snapshot = client.set_paused(False)
                 eff_wait = WaitAction(ticks=max(1, int(wait_ticks)))
                 snapshot = client.execute_action(eff_wait)
@@ -198,6 +201,7 @@ def run_live_session(
 
 def run_replay_mock(
     *,
+    agent: RealGameAgent | None = None,
     max_decisions: int = 80,
     decision_interval_ms: float = 0.0,
     wait_ticks: int = 2,
@@ -214,6 +218,7 @@ def run_replay_mock(
         ) as client:
             return run_live_session(
                 client,
+                agent=agent,
                 max_decisions=max_decisions,
                 decision_interval_ms=decision_interval_ms,
                 wait_ticks=wait_ticks,
@@ -233,6 +238,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--decision-interval-ms", type=float, default=0.0)
     parser.add_argument("--wait-ticks", type=int, default=2)
     parser.add_argument(
+        "--agent",
+        default="open_topology",
+        choices=list(PLANNER_NAMES),
+        help="Selectable planner implementation for RealGameAgent.",
+    )
+    parser.add_argument(
         "--speed",
         type=float,
         default=1.0,
@@ -247,8 +258,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_arg_parser().parse_args(argv)
+    agent = RealGameAgent(planner=args.agent)
     if args.replay_mock:
         summary = run_replay_mock(
+            agent=agent,
             max_decisions=args.max_decisions,
             decision_interval_ms=args.decision_interval_ms,
             wait_ticks=args.wait_ticks,
@@ -261,7 +274,7 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             timeout_s=args.timeout,
         ) as client:
-            summary = run_dry_run(client)
+            summary = run_dry_run(client, agent=agent)
     else:
         with BridgeRpcClient(
             host=args.host,
@@ -270,6 +283,7 @@ def main(argv: list[str] | None = None) -> int:
         ) as client:
             summary = run_live_session(
                 client,
+                agent=agent,
                 max_decisions=args.max_decisions,
                 decision_interval_ms=args.decision_interval_ms,
                 wait_ticks=args.wait_ticks,

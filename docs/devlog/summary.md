@@ -1,3 +1,7 @@
+## 2026-11-19
+
+- Added unified `ADD_TO_LINE(line_id, station_id, position, is_looped)` command to the Unity bridge mod (`mods/MiniMetroRoreaBridge/Protocol.cs`, `ActionExecutor.cs`), `bridge-rpc-v1` (`src/rl/bridge_protocol.py`), and `scripts/mock_metro_rpc.py`, and implemented the selectable `optimal_replan` agent (`src/rl/optimal_replan_open.py`, `--agent optimal_replan` in `scripts/play_real_metro.py`) that recalculates the optimal network under `compute_open_ml_objective` on every new station or unlocked asset without demolition penalties/cooldowns and executes the shortest transition sequence (`ADD_TO_LINE`, `CONNECT`, `REMOVE_LINE`), fixing ghost-line unpausing in `play_real_metro.py`.
+
 ## 2026-11-18
 
 - Renamed the `rorea_*` algorithm family, modules, scripts, tests, and internal identifiers to scientific names (`multiline_balancing`, `load_objective`, `global_replan`, `parametric_cem`, `open_topology_planner`, `contextual_residual`, `ParametricPolicyParams`, `ContextualResidualMLP`, `SHAPE_TO_SEMANTIC`).

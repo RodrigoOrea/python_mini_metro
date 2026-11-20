@@ -23,6 +23,9 @@ from rl.open_topology_planner import (
     OpenStation,
     choose_open,
 )
+from rl.optimal_replan_open import OptimalReplanState, choose_optimal_replan
+
+PLANNER_NAMES: tuple[str, ...] = ("open_topology", "optimal_replan")
 
 SHAPE_TO_SEMANTIC: dict[str, str] = {
     StationShape.CIRCLE.value: "CIRCLE",
@@ -175,16 +178,29 @@ def choose_weekly_upgrade(
 
 @dataclass
 class RealGameAgent:
-    """Stateful ``open_topology_planner`` policy wrapper for ``bridge-rpc-v1`` snapshots."""
+    """Stateful ``open_topology_planner`` or ``optimal_replan_open`` policy wrapper for ``bridge-rpc-v1`` snapshots."""
 
     params: ParametricPolicyParams = BEST_PHASE1_PARAMS
-    state: OpenPlannerState = field(default_factory=OpenPlannerState)
+    planner: str = "open_topology"
+    state: OpenPlannerState | OptimalReplanState = field(
+        default_factory=OpenPlannerState
+    )
     decision: int = 0
     max_lines_cap: int = 7
     max_locos_per_line: int = 4
     supports_insert_station: bool = True
     supports_relocate_loco: bool = True
     can_remove_tracks: bool = True
+
+    def __post_init__(self) -> None:
+        if self.planner not in PLANNER_NAMES:
+            raise ValueError(
+                f"Unknown planner {self.planner!r}; expected one of {PLANNER_NAMES}"
+            )
+        if self.planner == "optimal_replan" and not isinstance(
+            self.state, OptimalReplanState
+        ):
+            self.state = OptimalReplanState()
 
     def reset(self) -> None:
         """Reset planner state and decision counter."""
@@ -223,6 +239,10 @@ class RealGameAgent:
                 can_remove_tracks=self.can_remove_tracks,
                 include_ghost_lines=self.state.pending_rebuild is not None,
             )
+            if self.planner == "optimal_replan":
+                assert isinstance(self.state, OptimalReplanState)
+                return choose_optimal_replan(view, self.state, self.params)
+            assert isinstance(self.state, OpenPlannerState)
             return choose_open(view, self.state, self.params)
 
         return None

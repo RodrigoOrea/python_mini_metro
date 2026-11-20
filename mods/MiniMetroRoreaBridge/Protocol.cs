@@ -31,12 +31,12 @@ namespace MiniMetroRoreaBridge
     public static class BridgeCommands
     {
         public const string PING = "PING", GET_STATE = "GET_STATE", SET_PAUSED = "SET_PAUSED", SET_SPEED = "SET_SPEED";
-        public const string WAIT = "WAIT", CONNECT = "CONNECT", EXTEND_LINE = "EXTEND_LINE", PREPEND_LINE = "PREPEND_LINE";
+        public const string WAIT = "WAIT", CONNECT = "CONNECT", EXTEND_LINE = "EXTEND_LINE", PREPEND_LINE = "PREPEND_LINE", ADD_TO_LINE = "ADD_TO_LINE";
         public const string INSERT_STATION = "INSERT_STATION", REPLACE_LINE = "REPLACE_LINE", REMOVE_LINE = "REMOVE_LINE";
         public const string ASSIGN_LOCO = "ASSIGN_LOCO", RELOCATE_LOCO = "RELOCATE_LOCO", ATTACH_CARRIAGE = "ATTACH_CARRIAGE";
         public const string PLACE_INTERCHANGE = "PLACE_INTERCHANGE", PICK_UPGRADE = "PICK_UPGRADE";
         private static readonly HashSet<string> ActionOrControl = new HashSet<string>(StringComparer.Ordinal) {
-            SET_PAUSED, SET_SPEED, WAIT, CONNECT, EXTEND_LINE, PREPEND_LINE, INSERT_STATION,
+            SET_PAUSED, SET_SPEED, WAIT, CONNECT, EXTEND_LINE, PREPEND_LINE, ADD_TO_LINE, INSERT_STATION,
             REPLACE_LINE, REMOVE_LINE, ASSIGN_LOCO, RELOCATE_LOCO, ATTACH_CARRIAGE, PLACE_INTERCHANGE, PICK_UPGRADE
         };
         public static bool IsKnownActionOrControl(string cmd) => cmd != null && ActionOrControl.Contains(cmd);

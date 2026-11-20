@@ -23,7 +23,7 @@ def _se(name: str, words: str) -> Any:
 
 
 _OAK = (
-    "WAIT CONNECT EXTEND_LINE PREPEND_LINE INSERT_STATION REPLACE_LINE REMOVE_LINE "
+    "WAIT CONNECT EXTEND_LINE PREPEND_LINE ADD_TO_LINE INSERT_STATION REPLACE_LINE REMOVE_LINE "
     "ASSIGN_LOCO RELOCATE_LOCO ATTACH_CARRIAGE PLACE_INTERCHANGE PICK_UPGRADE"
 )
 ErrorCode = _se(
@@ -152,7 +152,7 @@ fu:overload_progress
 sp:speed_multiplier
 c1:tunnels
 i1:screen_width screen_height ticks count peep_capacity
-i0:lines_available lines_total locos_available carriages_available tunnels_available interchanges_available index wait_ms color_index tunnels_used carriages capacity onboard_count seq timestamp_ms deliveries day offer_index
+i0:lines_available lines_total locos_available carriages_available tunnels_available interchanges_available index position wait_ms color_index tunnels_used carriages capacity onboard_count seq timestamp_ms deliveries day offer_index
 s:label city_id error
 b:is_interchange is_looped is_ghost is_unassignment_queued is_pending is_paused is_waiting_for_locomotive ok
 id:id line_id source_line_id target_line_id u v station_id after_station_id train_id
@@ -379,6 +379,9 @@ WaitAction = _act("WAIT", "ticks:i=1")
 ConnectAction = _act("CONNECT", "station_ids:ids is_looped:b=F color_index:oi=n")
 ExtendLineAction = _act("EXTEND_LINE", "line_id:id station_id:id is_looped:b=F")
 PrependLineAction = _act("PREPEND_LINE", "line_id:id station_id:id is_looped:b=F")
+AddToLineAction = _act(
+    "ADD_TO_LINE", "line_id:id station_id:id position:i is_looped:b=F"
+)
 InsertStationAction = _act(
     "INSERT_STATION", "line_id:id station_id:id after_station_id:id"
 )

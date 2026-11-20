@@ -44,6 +44,7 @@ namespace MiniMetroRoreaBridge
                 BridgeCommands.CONNECT => ExecuteConnectCmd(game, city, lineRegistry, args, req.Id, seq),
                 BridgeCommands.EXTEND_LINE => ExecuteExtendOrPrependCmd(game, city, lineRegistry, args, LineDirection.FORWARDS, req.Id, seq),
                 BridgeCommands.PREPEND_LINE => ExecuteExtendOrPrependCmd(game, city, lineRegistry, args, LineDirection.BACKWARDS, req.Id, seq),
+                BridgeCommands.ADD_TO_LINE => ExecuteAddToLineCmd(game, city, lineRegistry, args, req.Id, seq),
                 BridgeCommands.INSERT_STATION => ExecuteInsertStationCmd(game, city, lineRegistry, args, req.Id, seq),
                 BridgeCommands.REPLACE_LINE => ExecuteReplaceLineCmd(game, city, lineRegistry, args, req.Id, seq),
                 BridgeCommands.REMOVE_LINE => ExecuteRemoveLineCmd(game, city, lineRegistry, args, req.Id, seq),
@@ -219,6 +220,42 @@ namespace MiniMetroRoreaBridge
             line.ScheduleAudioEvent(LineChangeType.StationAdded, targetStation);
             line.DirtyTracks(); game.OnLineEditComplete(); lineRegistry.ExtractOrGetCachedRoute(line);
             return null;
+        }
+
+        private static RpcResponseDto ExecuteAddToLineCmd(Game game, City city, LineRegistry lineRegistry, Dictionary<string, object> args, object id, long seq)
+        {
+            if (!CheckAllowedKeys(args, "line_id", "station_id", "position", "is_looped", "loop")
+                || !TryGetLoopedFlag(args, out bool isLooped)
+                || !TryGetEntityId(args, "line_id", out int lineId)
+                || !TryGetEntityId(args, "station_id", out int stationId)
+                || !args.TryGetValue("position", out object pv)
+                || !TryGetInt(pv, out int position)
+                || position < 0)
+                return Fail(id, seq, BridgeErrorCodes.INVALID_ARGS, "Invalid arguments for ADD_TO_LINE");
+            if (!TryResolveActiveLine(city, lineRegistry, lineId, out Line line, out string lineCode, out string lineErr))
+                return Fail(id, seq, lineCode, lineErr);
+            Station targetStation = city.GetStationById(stationId);
+            if (targetStation == null || !targetStation.IsActive || !targetStation.CanBeConnected)
+                return Fail(id, seq, BridgeErrorCodes.INVALID_ARGS, "Target station is invalid or inactive: " + stationId);
+
+            List<int> curRoute = lineRegistry.ExtractOrGetCachedRoute(line);
+            if (curRoute.Count < 2)
+                return Fail(id, seq, BridgeErrorCodes.INVALID_STATE, "Line has fewer than 2 stations");
+            if (position > curRoute.Count)
+                return Fail(id, seq, BridgeErrorCodes.INVALID_ARGS, "ADD_TO_LINE position out of range: " + position);
+
+            if (!line.IsLooping && position == 0)
+                return ExecuteExtendOrPrepend(game, city, lineRegistry, line, targetStation, LineDirection.BACKWARDS, isLooped, id, seq);
+            if (!line.IsLooping && position == curRoute.Count)
+                return ExecuteExtendOrPrepend(game, city, lineRegistry, line, targetStation, LineDirection.FORWARDS, isLooped, id, seq);
+
+            if (isLooped && !line.IsLooping)
+                return Fail(id, seq, BridgeErrorCodes.INVALID_ARGS, "Cannot close loop via interior ADD_TO_LINE");
+            if (!game.CanRemoveTracks)
+                return Fail(id, seq, BridgeErrorCodes.INVALID_STATE, "Track modification is disabled in Extreme mode");
+
+            int afterIdx = (position - 1 + curRoute.Count) % curRoute.Count;
+            return ExecuteInsertStation(game, city, lineRegistry, line, targetStation, curRoute[afterIdx], id, seq);
         }
 
         private static RpcResponseDto ExecuteInsertStationCmd(Game game, City city, LineRegistry lineRegistry, Dictionary<string, object> args, object id, long seq)
